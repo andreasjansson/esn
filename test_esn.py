@@ -1,4 +1,4 @@
-from esn import EchoStateNetwork, WeightOptimiser
+from esn import EchoStateNetwork, evaluate, NeighbourESN
 import unittest2 as unittest
 import numpy as np
 import matplotlib.pyplot as plt
@@ -178,17 +178,32 @@ class TestEchoStateNetwork(unittest.TestCase):
         plt.plot(output)
         plt.show()
         
-class TestWeightOptimiser(unittest.TestCase):
+class TestEvaluate(unittest.TestCase):
 
-    def test_optimise(self):
+    def test_evaluate(self):
         input, output = my_single_class_data()
-        best_output = None
-        best_error = float('+inf')
-        for i in xrange(10):
-            esn = my_single_class_esn()
-            optimiser = WeightOptimiser(esn, input, output, 1000)
-            estimated_output, error = optimiser.optimise()
-            if error < best_error:
-                best_output = estimated_output
-                best_error = error
+        esn = my_single_class_esn()
+        estimated_output, error = evaluate(esn, input, output, 1000)
+        import ipdb; ipdb.set_trace()
+
+class TestNeighbourESN(unittest.TestCase):
+
+    def test_neighbour_esn(self):
+        input, output = my_single_class_data()
+
+        esn = NeighbourESN(
+            n_input_units=1,
+            n_internal_units=64,
+            n_output_units=1,
+            input_scaling=[3],
+            input_shift=[0],
+            teacher_scaling=[0.001],
+            teacher_shift=[-.05],
+            noise_level=0.001,
+            spectral_radius=0.85,
+            feedback_scaling=[1.3],
+            feedback_every=3,
+            output_activation_function='tanh',
+        )
+        estimated_output, error = evaluate(esn, input, output, 1000, 5)
         import ipdb; ipdb.set_trace()
