@@ -1,7 +1,13 @@
-from esn import EchoStateNetwork, evaluate, NeighbourESN
+from esn import EchoStateNetwork, optimise, NeighbourESN
 import unittest2 as unittest
 import numpy as np
 import matplotlib.pyplot as plt
+import minimidi
+import pyaudio
+import fluidsynth
+import struct
+
+SR = 4000
 
 def scholarpedia_esn():
     return EchoStateNetwork(
@@ -100,7 +106,7 @@ def my_single_class_esn():
         output_activation_function='tanh',
     )
 
-def my_single_class_data(sequence_length=10000, min_freq=440, max_freq=880, sr=4096):
+def my_single_class_data(sequence_length=10000, min_freq=440, max_freq=880, sr=SR):
 
     freqs = np.zeros((sequence_length, 1))
     audio = np.zeros((sequence_length, 1))
@@ -127,6 +133,88 @@ def my_single_class_data(sequence_length=10000, min_freq=440, max_freq=880, sr=4
     audio = (audio + 1) / 2
 
     return audio, freqs
+
+def my_pitched_data(sequence_length=10000, min_pitch=60, max_pitch=71, sr=SR):
+
+    pitches = np.zeros((sequence_length, 1))
+    audio = np.zeros((sequence_length, 1))
+
+    def rnd_pitch():
+        return round(np.random.rand() * (max_pitch - min_pitch) + min_pitch)
+
+    current_pitch = rnd_pitch()
+    current_pitch = 60
+
+    for i in xrange(sequence_length):
+        pitches[i, 0] = current_pitch
+
+        if i % 1000 == 0:
+            current_pitch += 1
+
+    phase = 0
+    c4 = 261.63
+    for i in xrange(1, sequence_length):
+        freq = c4 * np.power(2.0, (pitches[i, 0] - 60) / 12.0)
+        phase += 2 * np.pi / sr
+        if phase > 2 * np.pi:
+            phase -= 2 * np.pi
+        audio[i, 0] = np.sin(phase * freq)
+
+    audio = (audio + 1) / 2
+
+    return pitches, audio
+
+def my_piano_data(note_length=4000, min_pitch=60, max_pitch=64, sr=SR):
+
+    synth = fluidsynth.Synth(samplerate=SR)
+    soundfont = synth.sfload('/usr/share/soundfonts/fluidr3/FluidR3GM.SF2')
+    synth.program_select(0, soundfont, 0, 41)
+
+    n_notes = max_pitch - min_pitch
+    pitches = np.zeros((note_length * n_notes, 1))
+    audio = np.zeros((note_length * n_notes, 1))
+
+    t = 0
+    for pitch in range(min_pitch, max_pitch):
+        synth.noteon(0, pitch, 127)
+        audio[t : t + note_length, 0] = synth.get_samples(note_length)[::2]
+        pitches[t : t + note_length, 0] = [pitch] * note_length
+        synth.noteoff(0, pitch)
+        t += note_length
+
+    audio = audio / 3200.0
+
+    return pitches, audio
+
+def scholarpedia_data2(sequence_length=5000, out_min_period=4, out_max_period=16):
+    out_period_setting = np.zeros((sequence_length, 1))
+    current_value = np.random.rand()
+    for i in xrange(sequence_length):
+        if np.random.rand() < 0.015:
+            current_value = np.random.rand()
+        out_period_setting[i, 0] = current_value
+
+    input = out_period_setting
+
+    current_sin_arg = 0
+    output = np.zeros((sequence_length, 1))
+    for i in xrange(1, sequence_length):
+        current_out_period_length = out_period_setting[i-1, 0] * (out_max_period - out_min_period) + out_min_period
+        current_sin_arg = current_sin_arg + 2 * np.pi / current_out_period_length
+        output[i, 0] = (np.sin(current_sin_arg) + 1) / 2
+
+    return input, output
+
+def my_midi_data():
+
+    pitches = [0, 0, 0, 1, 0, 0, 1, 0, 1] * 100
+    output = np.zeros((len(pitches), 2))
+    for i, pitch in enumerate(pitches):
+        output[i, pitch] = 1
+
+    input = np.ones((len(pitches), 1))
+
+    return input, output
 
 def split_data(input, output, train_fraction=0.8):
     train_length = len(input) * train_fraction
@@ -186,6 +274,8 @@ class TestEvaluate(unittest.TestCase):
         estimated_output, error = evaluate(esn, input, output, 1000)
         import ipdb; ipdb.set_trace()
 
+current_pitch = 60
+
 class TestNeighbourESN(unittest.TestCase):
 
     def test_neighbour_esn(self):
@@ -202,8 +292,81 @@ class TestNeighbourESN(unittest.TestCase):
             noise_level=0.001,
             spectral_radius=0.85,
             feedback_scaling=[1.3],
-            feedback_every=3,
             output_activation_function='tanh',
         )
         estimated_output, error = evaluate(esn, input, output, 1000, 5)
         import ipdb; ipdb.set_trace()
+
+    def test_neighbour_esn2(self):
+        input, output = my_piano_data()
+
+        audio = pyaudio.PyAudio()
+        stream = audio.open(format=pyaudio.paInt16, rate=SR,
+                            channels=1, output=True)
+
+        import ipdb; ipdb.set_trace()
+
+        play(stream, output)
+
+        esn = NeighbourESN(
+            n_input_units=1,
+            n_internal_units=10*10,
+            n_output_units=1,
+            input_scaling=[0.1],
+            input_shift=[0],
+            teacher_scaling=[1.4],
+            teacher_shift=[-0.7],
+            noise_level=0.001,
+            spectral_radius=0.5,
+            feedback_scaling=[0.8],
+        )
+
+        esn = EchoStateNetwork(
+            n_input_units=1,
+            n_internal_units=200,
+            n_output_units=1,
+            connectivity=0.05,
+            input_scaling=[0.01],
+            input_shift=[0],
+            teacher_scaling=[1.4],
+            teacher_shift=[-0.7],
+            noise_level=0.001,
+            spectral_radius=0.25,
+            feedback_scaling=[0.8],
+        )
+
+        best_esn, estimated_output, error = optimise(esn, input, output, 500, 5)
+
+        import ipdb; ipdb.set_trace()
+
+        def play_note(channel, pitch, velocity):
+            global current_pitch
+            print pitch
+            current_pitch = pitch
+
+#        minimidi.add_event_listener('note_on', play_note)
+
+        global current_pitch
+
+        play(stream, estimated_output)
+
+        old_pitch = None
+        while True:
+            if current_pitch != old_pitch:
+                print 'pitch: %s' % current_pitch
+                output = esn.test(np.array([current_pitch] * 5000).reshape((5000, 1)))
+                play(stream, output)
+                old_pitch = current_pitch
+
+            current_pitch += 1
+
+        minimidi.remove_all_event_listeners()
+
+
+def play(stream, output):
+    output = output - (np.max(output) + np.min(output)) / 2.0
+    output *= (2**14 - 1.0) / np.max(output)
+    output = output.astype(np.int16).reshape(len(output)).tolist()
+    packed_output = struct.pack('%sh' % len(output), *output)
+    stream.write(packed_output)
+

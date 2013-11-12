@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.sparse
 import matplotlib.pyplot as plt
+import copy
 
 class EchoStateNetwork(object):
 
@@ -56,6 +57,10 @@ class EchoStateNetwork(object):
         self.output_weights = np.zeros((
             self.n_output_units, self.n_internal_units + self.n_input_units))
 
+        self.total_state = np.zeros((self.n_input_units + self.n_internal_units +
+                                self.n_output_units, 1))
+        self.internal_state = np.zeros((self.n_internal_units, 1))
+
     def train(self, input, output, n_forget_points=0):
         assert len(input) == len(output)
         assert input.shape[1] == self.n_input_units
@@ -79,30 +84,27 @@ class EchoStateNetwork(object):
     def _compute_state_matrix(self, input, output=None, n_forget_points=0):
         state_matrix = np.zeros((len(input) - n_forget_points,
                                  self.n_input_units + self.n_internal_units))
-        total_state = np.zeros((self.n_input_units + self.n_internal_units +
-                                self.n_output_units, 1))
-        internal_state = np.zeros((self.n_internal_units, 1))
 
         for i, input_point in enumerate(input):
             scaled_input = (self.input_scaling * input_point + self.input_shift).reshape(
                 len(input_point), 1)
 
-            total_state[self.n_internal_units :
-                        self.n_internal_units + self.n_input_units] = scaled_input
-            internal_state = self._update_internal_state(internal_state, total_state)
+            self.total_state[self.n_internal_units :
+                             self.n_internal_units + self.n_input_units] = scaled_input
+            self._update_internal_state()
 
             if output is None:
                 scaled_output = self.output_activation_function(
                     np.dot(self.output_weights,
-                           np.vstack((internal_state, scaled_input))))
+                           np.vstack((self.internal_state, scaled_input))))
             else:
                 scaled_output = self.teacher_scaling * output[i,:] + self.teacher_shift
                 scaled_output = scaled_output.reshape((len(scaled_output), 1))
 
-            total_state = np.vstack((internal_state, scaled_input, scaled_output))
+            self.total_state = np.vstack((self.internal_state, scaled_input, scaled_output))
 
             if i >= n_forget_points:
-                state_matrix[i - n_forget_points,:] = np.vstack((internal_state, scaled_input)).T
+                state_matrix[i - n_forget_points,:] = np.vstack((self.internal_state, scaled_input)).T
 
         return state_matrix
 
@@ -118,14 +120,13 @@ class EchoStateNetwork(object):
         internal_state += self.noise_level * np.random.random(
             (self.n_internal_units, 1)) - .5
 
-    def _update_internal_state(self, internal_state, total_state):
+    def _update_internal_state(self):
         scaled_feedback_weights = np.dot(self.feedback_weights, np.diag(self.feedback_scaling))
         scaled_feedback_weights = scaled_feedback_weights.reshape((len(self.feedback_weights), self.n_output_units))
-        internal_state = self.reservoir_activation_function(
+        self.internal_state = self.reservoir_activation_function(
             np.dot(np.hstack((self.internal_weights, self.input_weights, scaled_feedback_weights)),
-                   total_state))
-        internal_state += self.noise_level * (np.random.rand(self.n_internal_units, 1) - .5)
-        return internal_state
+                   self.total_state))
+        self.internal_state += self.noise_level * (np.random.rand(self.n_internal_units, 1) - .5)
 
     def _compute_teacher_matrix(self, output, n_forget_points):
         teacher = self.teacher_scaling * output[n_forget_points:, :] + self.teacher_shift
@@ -163,7 +164,8 @@ class NeighbourESN(EchoStateNetwork):
 
     def __init__(self,
                  n_input_units,
-                 n_internal_units,
+                 width,
+                 height,
                  n_output_units,
                  input_scaling,
                  input_shift,
@@ -172,13 +174,14 @@ class NeighbourESN(EchoStateNetwork):
                  noise_level,
                  spectral_radius,
                  feedback_scaling,
-                 feedback_every,
                  leakage=0,
                  time_constants=None,
                  reservoir_activation_function=np.tanh,
                  output_activation_function='identity'):
 
-        self.feedback_every = feedback_every
+        self.width = width
+        self.height = height
+        n_internal_units = width * height
 
         super(NeighbourESN, self).__init__(
             n_input_units=n_input_units,
@@ -198,62 +201,55 @@ class NeighbourESN(EchoStateNetwork):
             connectivity=None
         )
 
-    def height(self):
-        height = int(np.sqrt(self.n_internal_units))
-        assert self.n_internal_units % height == 0 # is rect
-        return height
-
-    def width(self):
-        return self.n_internal_units / self.height()
+    def get_weight(self, x1, y1, x2, y2):
+        return self.internal_weights[self.point_to_index(x1, y1), self.point_to_index(x2, y2)]
 
     def point_to_index(self, x, y):
-        return x % self.width() + y * self.width()
+        return x * self.width + y % self.width
 
     def _generate_input_weights(self):
         weights = np.zeros((self.n_internal_units, self.n_input_units))
-        left_column = 2 * np.random.random((self.height(), self.n_input_units)) - 1
-        weights[np.arange(self.n_internal_units) % self.width() == 0, :] = left_column
+        left_column = 2 * np.random.random((self.height, self.n_input_units)) - 1
+        weights[np.arange(self.n_internal_units) % self.width == 0, :] = left_column
         return weights
 
     def _generate_internal_weights(self):
         weights = np.zeros((self.n_internal_units, self.n_internal_units))
 
-        for x in xrange(self.width() - 1):
-            for y in xrange(self.height() - 1):
-                neighbours = [(x + 1, y), (x, y + 1), (x + 1, y + 1)]
-                for nx, ny in neighbours:
+        for x in xrange(self.width - 1):
+            for y in xrange(self.height - 1):
+                p1 = (x, y)
+                p2 = (x + 1, y)
+                p3 = (x, y + 1)
+                p4 = (x + 1, y + 1)
+                neighbours = [(p1, p2), (p1, p3), (p1, p4), (p3, p2)]
+                if x == self.width - 2:
+                    neighbours.append((p2, p4))
+                if y == self.height - 2:
+                    neighbours.append((p3, p4))
+                for start, end in neighbours:
                     if np.random.rand() < .5:
-                        start = (x, y)
-                        end = (nx, ny)
-                    else:
-                        start = (nx, ny)
-                        end = (x, y)
+                        start, end = end, start
                     weights[self.point_to_index(*start),
                             self.point_to_index(*end)] = np.random.rand()
 
         return self._normalise_internal_weights(weights)
 
-    def _get_feedback_indices(self):
-        return ((np.arange(self.n_input_units) + 1) %
-                (self.width() * self.feedback_every)) == 0
-
     def _generate_feedback_weights(self):
         weights = np.zeros((self.n_internal_units, self.n_output_units))
-        feedback_indices = self._get_feedback_indices()
-        feedback_weights = 2 * np.random.rand(
-            len(feedback_indices), self.n_output_units) - 1
-        weights[feedback_indices,:] = feedback_weights
+        right_column = 2 * np.random.random((self.height, self.n_output_units)) - 1
+        weights[np.arange((self.n_internal_units) - 1) % self.width == 0, :] = right_column
         return weights
 
-    def _generate_output_weights(self):
-        weights = np.zeros((self.n_internal_units, self.n_output_units))
-        output_indices = np.logical_not(self._get_feedback_indices())
-        output_weights = 2 * np.random.rand(
-            len(output_indices), self.n_output_units) - 1
-        weights[output_indices,:] = output_weights
-        return weights
 
-def evaluate(esn, input, output, forget_points, iterations=10):
+def nrmse(estimated, correct):
+    n_forget_points = len(correct) - len(estimated)
+    correct = correct[n_forget_points:, :]
+    correct_variance = np.var(correct)
+    mean_error = sum(np.power(estimated - correct, 2)) / len(estimated)
+    return np.sqrt(mean_error / correct_variance)
+
+def optimise(esn, input, output, forget_points, iterations=10, test=nrmse):
     best_output = None
     best_error = float('+inf')
 
@@ -263,17 +259,11 @@ def evaluate(esn, input, output, forget_points, iterations=10):
 
         esn.train(input, output, forget_points)
         estimated_output = esn.test(input)
-        error = nrmse(estimated_output, output)
+        error = np.sum(nrmse(estimated_output, output))
         if error < best_error:
             best_output = estimated_output
             best_error = error
+            best_esn = copy.deepcopy(esn)
 
-    return best_output, best_error
-
-
-def nrmse(estimated, correct):
-    n_forget_points = len(correct) - len(estimated)
-    correct = correct[n_forget_points:, :]
-    correct_variance = np.var(correct)
-    mean_error = sum(np.power(estimated - correct, 2)) / len(estimated)
-    return np.sqrt(mean_error / correct_variance)
+    return best_esn, best_output, best_error
+    
