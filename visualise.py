@@ -8,27 +8,56 @@ class Visualiser(wx.Frame):
 #        self.SetDoubleBuffered(True)
 
         self.esn = neighbour_esn
-        self.neurons = {}
+        self.input_neurons = {}
+        self.internal_neurons = {}
+        self.output_neurons = {}
         self.arrows = {}
-        self.add_components()
+
+        self.main_panel = wx.Panel(self)
+        self.main_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.main_panel.SetSizer(self.main_sizer)
+
+        self.add_settings_panel()
+        self.add_input_neurons()
+        self.add_input_synapses()
+        self.add_internal_neurons_and_synapses()
+        self.add_feedback_synapses()
+        self.add_output_neurons()
+
         self.set_weights()
 
-    def add_components(self):
+    def add_settings_panel(self):
+        panel = wx.Panel(self.main_panel)
+        panel.SetBackgroundColour('#FFDDDD')
+        self.main_sizer.Add(panel, 2, wx.EXPAND | wx.LEFT)
 
-        panel = wx.Panel(self)
-        layout = wx.BoxSizer(wx.HORIZONTAL)
+    def add_input_neurons(self):
+        panel = wx.Panel(self.main_panel)
+        panel.SetBackgroundColour('#FFDDFF')
+        self.main_sizer.Add(panel, 1, wx.EXPAND | wx.LEFT)
 
-        settings_panel = wx.Panel(panel)
-        settings_panel.SetBackgroundColour('#FFDDDD')
-        layout.Add(settings_panel, 1, wx.EXPAND | wx.LEFT)
+        sizer = wx.GridSizer(max(5, self.esn.n_input_units * 2 - 1), 1)
+        panel.SetSizer(sizer)
 
-        main_panel = wx.Panel(panel)
-        main_panel.SetBackgroundColour('#DDFFDD')
-        layout.Add(main_panel, 5, wx.EXPAND | wx.RIGHT)
+    def add_input_synapses(self):
+        panel = wx.Panel(self.main_panel)
+        panel.SetBackgroundColour('#FFDDFF')
+        self.main_sizer.Add(panel, 1, wx.EXPAND | wx.LEFT)
+
+    def add_feedback_synapses(self):
+        pass
+
+    def add_output_neurons(self):
+        pass
+
+    def add_internal_neurons_and_synapses(self):
+        panel = wx.Panel(self.main_panel)
+        panel.SetBackgroundColour('#DDFFDD')
+        self.main_sizer.Add(panel, 8, wx.EXPAND | wx.RIGHT)
 
         cols = self.esn.width * 2 - 1
         rows = self.esn.height * 2 - 1
-        main_sizer = wx.GridSizer(cols, rows)
+        sizer = wx.GridSizer(cols, rows)
 
         for row in range(rows):
             if row % 2 == 0:
@@ -39,9 +68,9 @@ class Visualiser(wx.Frame):
                     x = col / 2
 
                 if col % 2 == 0 and row % 2 == 0:
-                    neuron = Neuron(main_panel)
-                    self.neurons[(x, y)] = neuron
-                    main_sizer.Add(neuron, flag=wx.EXPAND)
+                    neuron = Neuron(panel)
+                    self.internal_neurons[(x, y)] = neuron
+                    sizer.Add(neuron, flag=wx.EXPAND)
 
                 else:
                     if col % 2 == 1 and row % 2 == 1:
@@ -77,27 +106,45 @@ class Visualiser(wx.Frame):
                         if weight == 0:
                             x1, y1, x2, y2 = x2, y2, x1, y1
                         real_directions.append(((x1, y1), (x2, y2)))
-                    arrow = Arrow(main_panel, real_directions)
+                    positions = {}
+                    for direction in real_directions:
+                        (x1, y1), (x2, y2) = direction
+                        if x1 == x2 and y1 < y2:
+                            positions[direction] = ((.5, 0), (.5, 1))
+                        elif x1 == x2 and y1 > y2:
+                            positions[direction] = ((.5, 1), (.5, 0))
+                        elif y1 == y2 and x1 < x2:
+                            positions[direction] = ((0, .5), (1, .5))
+                        elif y1 == y2 and x1 > x2:
+                            positions[direction] = ((1, .5), (0, .5))
+                        elif x1 < x2 and y1 < y2:
+                            positions[direction] = ((0, 0), (1, 1))
+                        elif x1 < x2 and y1 > y2:
+                            positions[direction] = ((0, 1), (1, 0))
+                        elif x1 > x2 and y1 < y2:
+                            positions[direction] = ((1, 0), (0, 1))
+                        elif x1 > x2 and y1 > y2:
+                            positions[direction] = ((1, 1), (0, 0))
+                            
+                    arrow = SynapseGroup(panel, positions)
                     for direction in real_directions:
                         self.arrows[direction] = arrow
                         
-                    main_sizer.Add(arrow, flag=wx.EXPAND)
+                    sizer.Add(arrow, flag=wx.EXPAND)
 
-        main_panel.SetSizer(main_sizer)
-
-        panel.SetSizer(layout)
+        panel.SetSizer(sizer)
 
     def set_weights(self):
         for ((x1, y1), (x2, y2)), arrow in self.arrows.iteritems():
             weight = self.esn.get_weight(x1, y1, x2, y2)
             arrow.weights[((x1, y1), (x2, y2))] = weight
 
-class Arrow(wx.Panel):
+class SynapseGroup(wx.Panel):
 
-    def __init__(self, parent, directions):
-        super(Arrow, self).__init__(parent)
-        directions = directions
-        self.weights = {d: 0 for d in directions}
+    def __init__(self, parent, positions):
+        super(SynapseGroup, self).__init__(parent)
+        self.weights = {d: 0 for d in positions.keys()}
+        self.positions = positions
 
         self.Bind(wx.EVT_SIZE, self.on_size)
         self.Bind(wx.EVT_PAINT, self.on_paint)
@@ -113,69 +160,40 @@ class Arrow(wx.Panel):
 
         end_width = (w + h) / 10
         end_height = (math.sqrt(3) / 2) * end_width
-        ex1 = end_width / 2
-        ey = end_height
-        ex2 = -end_width / 2
-        a = math.atan2(w, h)
-        rotx1 = ex1 * math.cos(a) + ey * math.sin(a)
-        roty1 = -ex1 * math.sin(a) + ey * math.cos(a)
-        rotx2 = ex2 * math.cos(a) + ey * math.sin(a)
-        roty2 = -ex2 * math.sin(a) + ey * math.cos(a)
+        end_y = end_height
+        end_x1 = end_width / 2
+        end_x2 = -end_width / 2
 
-        for ((x1, y1), (x2, y2)), weight in self.weights.iteritems():
+        for direction, weight in self.weights.iteritems():
+            (x1, y1), (x2, y2) = self.positions[direction]
+            x1 *= w
+            y1 *= h
+            x2 *= w
+            y2 *= h
+
             if weight > 0:
-                colour = wx.Colour(255, 255 - int(min(weight, 1) * 255.0), 255)
+                c = 255 - int(min(weight, 1) * 255.0)
+                colour = wx.Colour(c, 255, c)
             else:
-                colour = wx.Colour(255 - int(min(-weight, 1) * 255.0), 255, 255)
+                c = 255 - int(min(-weight, 1) * 255.0)
+                colour = wx.Colour(255, c, c)
 
-            pen = wx.Pen(colour)
-#            if abs(weight) > 1:
-#                print weight
-#                pen.SetWidth(2)
-#                pen.SetStyle(wx.SHORT_DASH)
+            pen = wx.Pen(colour, 2)
+            if abs(weight) > 1:
+                pen.SetStyle(wx.SHORT_DASH)
             dc.SetPen(pen)
 
-            if x1 == x2:
-                dc.DrawLine(w / 2, 0, w / 2, h)
-                if y1 > y2:
-                    dc.DrawPolygon([(w / 2, 0),
-                                    (w / 2 - end_width / 2, end_height),
-                                    (w / 2 + end_width / 2, end_height)])
-                else:
-                    dc.DrawPolygon([(w / 2, h),
-                                    (w / 2 - end_width / 2, h - end_height),
-                                    (w / 2 + end_width / 2, h - end_height)])
+            dc.DrawLine(x1, y1, x2, y2)
 
-            elif y1 == y2:
-                dc.DrawLine(0, h / 2, w, h / 2)
-                if x1 > x2:
-                    dc.DrawPolygon([(0, h / 2),
-                                    (end_height, h / 2 - end_width / 2),
-                                    (end_height, h / 2 + end_width / 2)])
-                else:
-                    dc.DrawPolygon([(w, h / 2),
-                                    (w - end_height, h / 2 - end_width / 2),
-                                    (w - end_height, h / 2 + end_width / 2)])
-            elif (x1 < x2 and y1 < y2) or (x2 < x1 and y2 < y1):
-                dc.DrawLine(0, 0, w, h)
-                if x1 > x2:
-                    dc.DrawPolygon([(0, 0),
-                                    (rotx1, roty1),
-                                    (rotx2, roty2)])
-                else:
-                    dc.DrawPolygon([(w, h),
-                                    (w - rotx1, h - roty1),
-                                    (w - rotx2, h - roty2)])
-            else:
-                dc.DrawLine(0, h, w, 0)
-                if x1 > x2:
-                    dc.DrawPolygon([(0, h),
-                                    (rotx1, h - roty1),
-                                    (rotx2, h - roty2)])
-                else:
-                    dc.DrawPolygon([(w, 0),
-                                    (w - rotx1, roty1),
-                                    (w - rotx2, roty2)])
+            a = math.atan2(x2 - x1, y2 - y1)
+            rot_x1 = end_x1 * math.cos(a) + end_y * math.sin(a)
+            rot_y1 = -end_x1 * math.sin(a) + end_y * math.cos(a)
+            rot_x2 = end_x2 * math.cos(a) + end_y * math.sin(a)
+            rot_y2 = -end_x2 * math.sin(a) + end_y * math.cos(a)
+
+            dc.DrawPolygon([(x2, y2),
+                            (x2 - rot_x1, y2 - rot_y1),
+                            (x2 - rot_x2, y2 - rot_y2)])
 
 class Neuron(wx.Panel):
 
