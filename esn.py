@@ -201,11 +201,17 @@ class NeighbourESN(EchoStateNetwork):
             connectivity=None
         )
 
-    def get_weight(self, x1, y1, x2, y2):
+    def get_input_weight(self, i, x2, y2):
+        return self.input_weights[self.point_to_index(x2, y2), i]
+
+    def get_internal_weight(self, x1, y1, x2, y2):
         return self.internal_weights[self.point_to_index(x1, y1), self.point_to_index(x2, y2)]
 
+    def get_feedback_weight(self, i, x2, y2):
+        return self.feedback_weights[self.point_to_index(x2, y2), i]
+
     def point_to_index(self, x, y):
-        return x * self.width + y % self.width
+        return x % self.width + y * self.width
 
     def _generate_input_weights(self):
         weights = np.zeros((self.n_internal_units, self.n_input_units))

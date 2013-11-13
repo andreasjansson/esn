@@ -11,7 +11,9 @@ class Visualiser(wx.Frame):
         self.input_neurons = {}
         self.internal_neurons = {}
         self.output_neurons = {}
-        self.arrows = {}
+        self.input_synapses = {}
+        self.internal_synapses = {}
+        self.feedback_synapses = {}
 
         self.main_panel = wx.Panel(self)
         self.main_sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -19,9 +21,7 @@ class Visualiser(wx.Frame):
 
         self.add_settings_panel()
         self.add_input_neurons()
-        self.add_input_synapses()
-        self.add_internal_neurons_and_synapses()
-        self.add_feedback_synapses()
+        self.add_internal_neurons()
         self.add_output_neurons()
 
         self.set_weights()
@@ -33,26 +33,58 @@ class Visualiser(wx.Frame):
 
     def add_input_neurons(self):
         panel = wx.Panel(self.main_panel)
-        panel.SetBackgroundColour('#FFDDFF')
-        self.main_sizer.Add(panel, 1, wx.EXPAND | wx.LEFT)
+        self.main_sizer.Add(panel, 2, wx.EXPAND | wx.LEFT)
 
-        sizer = wx.GridSizer(max(5, self.esn.n_input_units * 2 - 1), 1)
+        rows = self.esn.n_input_units * 2 - 1
+        sizer = wx.GridSizer(rows, 2)
         panel.SetSizer(sizer)
 
-    def add_input_synapses(self):
-        panel = wx.Panel(self.main_panel)
-        panel.SetBackgroundColour('#FFDDFF')
-        self.main_sizer.Add(panel, 1, wx.EXPAND | wx.LEFT)
+        for row in range(rows):
+            if row % 2 == 0:
+                neuron = Neuron(panel)
+                self.input_neurons[row / 2] = neuron
+                sizer.Add(neuron, flag=wx.EXPAND)
 
-    def add_feedback_synapses(self):
-        pass
+        positions = {}
+        for input_i in xrange(self.esn.n_input_units):
+            for internal_y in xrange(self.esn.height):
+                y1 = (input_i / self.esn.n_input_units + .5) / rows
+                y2 = (internal_y * 2 + .5) / (self.esn.height * 2 - 1.0)
+                positions[(input_i, (0, internal_y))] = ((0, y1), (1, y2))
+
+        synapse_group = SynapseGroup(panel, positions)
+        sizer.Add(synapse_group, flag=wx.EXPAND)
+        for direction in positions:
+            self.input_synapses[direction] = synapse_group
 
     def add_output_neurons(self):
-        pass
-
-    def add_internal_neurons_and_synapses(self):
         panel = wx.Panel(self.main_panel)
-        panel.SetBackgroundColour('#DDFFDD')
+        self.main_sizer.Add(panel, 2, wx.EXPAND | wx.LEFT)
+
+        rows = self.esn.n_output_units * 2 - 1
+        sizer = wx.GridSizer(rows, 2)
+        panel.SetSizer(sizer)
+
+        positions = {}
+        for output_i in xrange(self.esn.n_output_units):
+            for internal_y in xrange(self.esn.height):
+                y1 = (output_i / self.esn.n_output_units + .5) / rows
+                y2 = (internal_y * 2 + .5) / (self.esn.height * 2 - 1.0)
+                positions[(output_i, (0, internal_y))] = ((1, y1), (0, y2))
+
+        synapse_group = SynapseGroup(panel, positions)
+        sizer.Add(synapse_group, flag=wx.EXPAND)
+        for direction in positions:
+            self.feedback_synapses[direction] = synapse_group
+
+        for row in range(rows):
+            if row % 2 == 0:
+                neuron = Neuron(panel)
+                self.output_neurons[row / 2] = neuron
+                sizer.Add(neuron, flag=wx.EXPAND)
+
+    def add_internal_neurons(self):
+        panel = wx.Panel(self.main_panel)
         self.main_sizer.Add(panel, 8, wx.EXPAND | wx.RIGHT)
 
         cols = self.esn.width * 2 - 1
@@ -102,7 +134,7 @@ class Visualiser(wx.Frame):
 
                     real_directions = []
                     for ((x1, y1), (x2, y2)) in directions:
-                        weight = self.esn.get_weight(x1, y1, x2, y2)
+                        weight = self.esn.get_internal_weight(x1, y1, x2, y2)
                         if weight == 0:
                             x1, y1, x2, y2 = x2, y2, x1, y1
                         real_directions.append(((x1, y1), (x2, y2)))
@@ -126,18 +158,27 @@ class Visualiser(wx.Frame):
                         elif x1 > x2 and y1 > y2:
                             positions[direction] = ((1, 1), (0, 0))
                             
-                    arrow = SynapseGroup(panel, positions)
+                    synapse_group = SynapseGroup(panel, positions)
                     for direction in real_directions:
-                        self.arrows[direction] = arrow
+                        self.internal_synapses[direction] = synapse_group
                         
-                    sizer.Add(arrow, flag=wx.EXPAND)
+                    sizer.Add(synapse_group, flag=wx.EXPAND)
 
         panel.SetSizer(sizer)
 
     def set_weights(self):
-        for ((x1, y1), (x2, y2)), arrow in self.arrows.iteritems():
-            weight = self.esn.get_weight(x1, y1, x2, y2)
-            arrow.weights[((x1, y1), (x2, y2))] = weight
+
+        for (input_i, (x2, y2)), synapse_group in self.input_synapses.iteritems():
+            weight = self.esn.get_input_weight(input_i, x2, y2)
+            synapse_group.weights[(input_i, (x2, y2))] = weight
+
+        for ((x1, y1), (x2, y2)), synapse_group in self.internal_synapses.iteritems():
+            weight = self.esn.get_internal_weight(x1, y1, x2, y2)
+            synapse_group.weights[((x1, y1), (x2, y2))] = weight
+
+        for (output_i, (x2, y2)), synapse_group in self.feedback_synapses.iteritems():
+            weight = self.esn.get_feedback_weight(output_i, x2, y2)
+            synapse_group.weights[(output_i, (x2, y2))] = weight
 
 class SynapseGroup(wx.Panel):
 
@@ -158,7 +199,7 @@ class SynapseGroup(wx.Panel):
         dc = wx.AutoBufferedPaintDC(self)
         dc.Clear()
 
-        end_width = (w + h) / 10
+        end_width = 10
         end_height = (math.sqrt(3) / 2) * end_width
         end_y = end_height
         end_x1 = end_width / 2
@@ -219,8 +260,8 @@ class Neuron(wx.Panel):
 from esn import NeighbourESN
 esn = NeighbourESN(
     n_input_units=1,
-    width=5,
-    height=5,
+    width=8,
+    height=8,
     n_output_units=1,
     input_scaling=[3],
     input_shift=[0],
