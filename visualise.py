@@ -48,7 +48,7 @@ def test_data1(sequence_length=10000, min_freq=20, max_freq=100, sr=SR):
 
     return audio, freqs
 
-def test_data2(sequence_length=33000, min_pitch=30, max_pitch=60, sr=SR):
+def test_data2(waveform, sequence_length=33000, min_pitch=30, max_pitch=60, sr=SR):
 
     pitches = np.zeros((sequence_length, 1))
     audio = np.zeros((sequence_length, 1))
@@ -69,7 +69,7 @@ def test_data2(sequence_length=33000, min_pitch=30, max_pitch=60, sr=SR):
     def rnd_pitch():
         return round(np.random.rand() * (max_pitch - min_pitch) + min_pitch)
 
-    current_pitch = pitches[0]
+    current_pitch = notes[0]
 
     for i in xrange(sequence_length):
         pitches[i, 0] = current_pitch
@@ -85,9 +85,12 @@ def test_data2(sequence_length=33000, min_pitch=30, max_pitch=60, sr=SR):
         phase += 2 * np.pi * freq / sr
         if phase > 2 * np.pi:
             phase -= 2 * np.pi
-        audio[i, 0] = np.sin(phase) #sine
-#        audio[i, 0] = (2 * (np.pi - np.abs(np.pi - phase)) / np.pi) - 1 #triangle
-#        audio[i, 0] = np.int(phase / np.pi) * 2 - 1 #square
+        if waveform.startswith('sin'):
+            audio[i, 0] = np.sin(phase) #sine
+        elif waveform.startswith('tri'):
+            audio[i, 0] = (2 * (np.pi - np.abs(np.pi - phase)) / np.pi) - 1 #triangle
+        elif waveform.startswith('sq'):
+            audio[i, 0] = np.int(phase / np.pi) * 2 - 1 #square
 
     audio = (audio + 1) / 2
 
@@ -420,7 +423,12 @@ def raise_callback_event(callback_state):
 
 
 if __name__ == '__main__':
-    input, output = test_data2()
+    # waveform=sin
+    # train_skip=400
+    # test_skip=400
+    import sys
+    _, waveform, train_skip, test_skip = sys.argv
+    input, output = test_data2(waveform)
 
     # for i in range(50):
     #     esn = NeighbourESN(
@@ -497,12 +505,12 @@ if __name__ == '__main__':
         if data is not None:
             visualiser.on_training_update(data)
 
-    state_matrix = esn.train(input, output, callback=refresh, n_forget_points=1000, callback_every=400)
+    state_matrix = esn.train(input, output, callback=refresh, n_forget_points=1000, callback_every=int(train_skip))
     visualiser.set_weights()
     esn.reset_state()
     esn.noise_level = 0
     print 'test'
-    estimated_output = esn.test(input, callback=refresh, n_forget_points=1000, callback_every=400)
+    estimated_output = esn.test(input, callback=refresh, n_forget_points=1000, callback_every=int(test_skip))
 
     error = np.sum(nrmse(estimated_output, output))
     print 'error: %s' % error
@@ -510,7 +518,7 @@ if __name__ == '__main__':
     visualiser.Close()
     refresh()
 
-    scikits.audiolab.play(estimated_output.T / max(estimated_output), fs=SR)
+    scikits.audiolab.play(estimated_output.T / max(abs(estimated_output)), fs=SR)
 
     plt.plot(output[1000:])
     plt.plot(estimated_output)
