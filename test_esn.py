@@ -1,4 +1,4 @@
-from esn import EchoStateNetwork, optimise, NeighbourESN
+from esn import EchoStateNetwork, optimise, NeighbourESN, GeneticOptimiser, fmin
 import unittest2 as unittest
 import numpy as np
 import matplotlib.pyplot as plt
@@ -106,7 +106,7 @@ def my_single_class_esn():
         output_activation_function='tanh',
     )
 
-def my_single_class_data(sequence_length=10000, min_freq=440, max_freq=880, sr=SR):
+def my_single_class_data(sequence_length=5000, min_freq=20, max_freq=100, sr=SR):
 
     freqs = np.zeros((sequence_length, 1))
     audio = np.zeros((sequence_length, 1))
@@ -117,7 +117,7 @@ def my_single_class_data(sequence_length=10000, min_freq=440, max_freq=880, sr=S
     current_freq = rnd_freq()
 
     for i in xrange(sequence_length):
-        if np.random.rand() < 0.0015:
+        if np.random.rand() < 0.03:
             current_freq = rnd_freq()
 
         freqs[i, 0] = current_freq
@@ -129,6 +129,9 @@ def my_single_class_data(sequence_length=10000, min_freq=440, max_freq=880, sr=S
         if phase > 2 * np.pi:
             phase -= 2 * np.pi
         audio[i, 0] = np.sin(phase * freq)
+
+#        if i > 1000:
+#            audio[i, 0] = 0
 
     audio = (audio + 1) / 2
 
@@ -361,6 +364,41 @@ class TestNeighbourESN(unittest.TestCase):
             current_pitch += 1
 
         minimidi.remove_all_event_listeners()
+
+class TestOptimise(unittest.TestCase):
+
+    def test_optimise(self):
+        import visualise
+        import cma
+
+        input, output = visualise.test_data2()
+
+        input_range = np.max(input) + np.min(input)
+        input_median = -np.median(input)
+
+        output_range = np.max(output) + np.min(output)
+        output_median = -np.median(output)
+
+        esn = NeighbourESN(
+        n_input_units=1,
+        width=6,
+        height=6,
+        n_output_units=1,
+        input_scaling=[.08],
+        input_shift=[-4.4],
+        teacher_scaling=[.5],
+        teacher_shift=[-.25],
+        noise_level=0.002,
+        spectral_radius=1.0,
+        feedback_scaling=[0.8],
+        output_activation_function='identity',
+        )
+
+        optimiser = GeneticOptimiser(esn, input, output, 50)
+        params = np.array(optimiser.initial_params())
+        res = cma.fmin(optimiser.evaluate, params, 0.1)
+        #res = fmin(optimiser.evaluate, params)
+        import ipdb; ipdb.set_trace()
 
 
 def play(stream, output):
