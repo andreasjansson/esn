@@ -35,8 +35,8 @@ class EchoStateNetwork(object):
         self.spectral_radius = spectral_radius
         self.feedback_scaling = feedback_scaling
         self.leakage = leakage
-        if time_constants is None:
-            time_constants = [1] * n_internal_units
+#        if time_constants is None:
+#            time_constants = [1] * n_internal_units
         self.time_constants = time_constants
         self.reservoir_activation_function = reservoir_activation_function
 
@@ -102,7 +102,10 @@ class EchoStateNetwork(object):
 
             self.total_state[self.n_internal_units :
                              self.n_internal_units + self.n_input_units] = scaled_input
-            self._update_internal_state()
+            if self.time_constants is None:
+                self._update_internal_state()
+            else:
+                self._update_internal_state_leaky()
 
             if output is None:
                 scaled_output = self.output_activation_function(
@@ -124,17 +127,18 @@ class EchoStateNetwork(object):
 
         return state_matrix
 
-    def _update_internal_state_leaky_UNTESTED(self, internal_state, total_state):
-        total_weights = np.vstack((
-            self.internal_weights, self.input_weights,
-            self.feedback_weights * np.diag(self.feedback_scaling)))
+    def _update_internal_state_leaky(self):
 
-        internal_state *= (1 - self.leakage * self.time_constants)
-        internal_state += (self.time_constants * self.reservoir_activation_function(
-            np.dot(total_weights * total_state)))
+        previous_internal_state = self.total_state[0:self.n_internal_units, :]
+        scaled_feedback_weights = np.dot(self.feedback_weights, np.diag(self.feedback_scaling))
+        scaled_feedback_weights = scaled_feedback_weights.reshape((len(self.feedback_weights), self.n_output_units))
 
-        internal_state += self.noise_level * np.random.random(
-            (self.n_internal_units, 1)) - .5
+        self.internal_state = ((1 - self.leakage * self.time_constants) * previous_internal_state +
+                               self.time_constants * self.reservoir_activation_function(
+                                   np.dot(np.hstack((self.internal_weights, self.input_weights, scaled_feedback_weights)),
+                                          self.total_state)))
+
+        self.internal_state += self.noise_level * (np.random.rand(self.n_internal_units, 1) - .5)
 
     def _update_internal_state(self):
         scaled_feedback_weights = np.dot(self.feedback_weights, np.diag(self.feedback_scaling))

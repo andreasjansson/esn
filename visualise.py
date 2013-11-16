@@ -48,7 +48,7 @@ def test_data1(sequence_length=10000, min_freq=20, max_freq=100, sr=SR):
 
     return audio, freqs
 
-def test_data2(waveform, sequence_length=33000, min_pitch=30, max_pitch=60, sr=SR):
+def test_data2(waveform, sequence_length=33000 // 4, min_pitch=30, max_pitch=60, sr=SR):
 
     pitches = np.zeros((sequence_length, 1))
     audio = np.zeros((sequence_length, 1))
@@ -480,9 +480,7 @@ if __name__ == '__main__':
         width=7,
         height=7,
         n_output_units=1,
-#        input_scaling=[.07],
         input_scaling=[.035],
-#        input_shift=[-3.8],
         input_shift=[-2],
         teacher_scaling=[1.2],
         teacher_shift=[-.6],
@@ -490,6 +488,23 @@ if __name__ == '__main__':
         spectral_radius=1.3,
         feedback_scaling=[.9],
         output_activation_function='identity',
+    )
+
+    esn = NeighbourESN(
+        n_input_units=1,
+        width=7,
+        height=7,
+        n_output_units=1,
+        input_scaling=[.035],
+        input_shift=[-2],
+        teacher_scaling=[1.2],
+        teacher_shift=[-.6],
+        noise_level=0.002,
+        spectral_radius=0.5,
+        feedback_scaling=[.9],
+        output_activation_function='identity',
+        leakage=.5,
+        time_constants=np.ones((7 * 7, 1)),
     )
 
     app = wx.App()
