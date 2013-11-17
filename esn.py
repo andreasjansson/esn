@@ -66,6 +66,20 @@ class EchoStateNetwork(object):
         self.internal_state = np.zeros((self.n_internal_units, 1))
         self.internal_state = np.zeros((self.n_internal_units, 1))
 
+    def serialize(self):
+        return {
+            'input_weights': self.input_weights,
+            'internal_weights': self.internal_weights,
+            'feedback_weights': self.feedback_weights,
+            'output_weights': self.output_weights,
+        }
+
+    def unserialize(self, obj):
+        self.input_weights = obj['input_weights']
+        self.internal_weights = obj['internal_weights']
+        self.feedback_weights = obj['feedback_weights']
+        self.output_weights = obj['output_weights']
+
     def train(self, input, output, n_forget_points=0, callback=None, callback_every=None):
         assert len(input) == len(output)
         assert input.shape[1] == self.n_input_units

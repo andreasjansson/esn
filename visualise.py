@@ -342,20 +342,33 @@ if __name__ == '__main__':
             visualiser.on_training_update(data)
             out = data[-1, -esn.n_output_units:]
             out = (out - esn.teacher_shift) / esn.teacher_scaling
+            notes_to_output = collections.defaultdict(list)
             for i, x in enumerate(out):
+                if i > 18:
+                    chan = 2
+                    note = {19: 29, 20: 31, 21: 33}[i]
+                elif i > 15:
+                    chan = 1
+                    note = {16: 36, 17: 40, 18: 44}[i]
+                else:
+                    chan = 0
+                    note = i + 69 - 24
+                alsaseq.output(alsamidi.noteoffevent(chan, note, 100))
                 if x > .4:
-                    if i > 15:
-                        chan = 1
-                        note = {16: 36, 17: 40, 18: 44}[i]
-                    else:
-                        chan = 0
-                        note = i + 69 - 24
-                    alsaseq.output(alsamidi.noteevent(chan, note, 127, 0, 10))
+                    notes_to_output[chan].append((x, note))
+            for chan, notes in notes_to_output.items():
+                if len(notes) > 3:
+                    notes = sorted(notes)[:3]
+                for _, note in notes:
+                    alsaseq.output(alsamidi.noteonevent(chan, note, 100))
             time.sleep(sleep)
 
         last_time = time.time()
 
-    state_matrix = esn.train(input, output, callback=refresh_midi, n_forget_points=n_forget_points, callback_every=int(train_skip))
+#    state_matrix = esn.train(input, output, callback=refresh_midi, n_forget_points=n_forget_points, callback_every=int(train_skip))
+    import cPickle
+    with open(sys.argv[3]) as f:
+        esn.unserialize(cPickle.load(f))
     visualiser.set_weights()
     esn.reset_state()
     esn.noise_level = 0

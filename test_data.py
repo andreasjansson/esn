@@ -247,7 +247,13 @@ def music():
     hat = 2
     notes2 = [hat, hat, kick, None, hat, None, snare, None] * 8 * 4
 
-    output_units = 16 + 3
+    f = 0
+    g = 1
+    a = 2
+    notes3 = [None, None, a, None, None, None, a, None, None, None, a, None, None, None, a, None, 
+              None, None, a, None, None, None, g, None, None, None, f, None, None, None, f, None] * 8
+
+    output_units = 16 + 3 + 3
     output = np.zeros((len(notes1), output_units))
     for i, n in enumerate(notes1):
         if n is not None:
@@ -255,6 +261,9 @@ def music():
     for i, n in enumerate(notes2):
         if n is not None:
             output[i, n + 16] = 1
+    for i, n in enumerate(notes3):
+        if n is not None:
+            output[i, n + 16 + 3] = 1
 
     input_units = 2
     input = np.zeros((len(notes1), 2))

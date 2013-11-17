@@ -369,36 +369,18 @@ class TestOptimise(unittest.TestCase):
 
     def test_optimise(self):
         import visualise
+        import test_data
         import cma
+        import cPickle
 
-        input, output = visualise.test_data2()
+        input, output, esn = test_data.music()
 
-        input_range = np.max(input) + np.min(input)
-        input_median = -np.median(input)
-
-        output_range = np.max(output) + np.min(output)
-        output_median = -np.median(output)
-
-        esn = NeighbourESN(
-        n_input_units=1,
-        width=6,
-        height=6,
-        n_output_units=1,
-        input_scaling=[.08],
-        input_shift=[-4.4],
-        teacher_scaling=[.5],
-        teacher_shift=[-.25],
-        noise_level=0.002,
-        spectral_radius=1.0,
-        feedback_scaling=[0.8],
-        output_activation_function='identity',
-        )
-
-        optimiser = GeneticOptimiser(esn, input, output, 50)
+        optimiser = GeneticOptimiser(esn, input, output, 0)
         params = np.array(optimiser.initial_params())
-        res = cma.fmin(optimiser.evaluate, params, 0.1)
+        res = cma.fmin(optimiser.evaluate, params, 0.1, maxiter=20)
         #res = fmin(optimiser.evaluate, params)
-        import ipdb; ipdb.set_trace()
+        with open('best_esn_%s.pkl' % res[1], 'w') as f:
+            cPickle.dump(esn.serialize(), f)
 
 
 def play(stream, output):
