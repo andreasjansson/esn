@@ -2,11 +2,14 @@ import cPickle
 import wx
 import math
 import collections
-import threading
+import time
+import sys
 import random
 import matplotlib.pyplot as plt
 import numpy as np
 import scikits.audiolab
+import alsaseq, alsamidi
+import cPickle
 
 from esn import NeighbourESN, optimise, nrmse
 import test_data
@@ -34,6 +37,9 @@ class Visualiser(wx.Frame):
         self.add_output_neurons()
 
         self.set_weights()
+
+        self.Update()
+        self.Show()
 
     def add_input_neurons(self):
         panel = wx.Panel(self.main_panel)
@@ -297,97 +303,127 @@ class Neuron(Sprite):
             dc.DrawLine(x1, y1, x2, y2)
 
 
-if __name__ == '__main__':
-    # waveform=sin
-    # train_skip=400
-    # test_skip=400
-    import sys
+app = None
+visualiser = None
+esn = None
+
+def refresh(data=None):
+    while app.Pending():
+        app.Dispatch()
+    if data is not None:
+        visualiser.on_training_update(data)
+
+last_time = None
+def refresh_midi(data=None):
+    global last_time
+    this_time = time.time()
+    if last_time is None:
+        last_time = this_time
+    sleep = max(0, .2 - (this_time - last_time))
+
+    print sleep
+
+    while app.Pending():
+        app.Dispatch()
+    if data is not None:
+        visualiser.on_training_update(data)
+        out = data[-1, -esn.n_output_units:]
+        out = (out - esn.teacher_shift) / esn.teacher_scaling
+        notes_to_output = collections.defaultdict(list)
+        for i, x in enumerate(out):
+            if i > 18:
+                chan = 2
+                note = {19: 29, 20: 31, 21: 33}[i]
+            elif i > 15:
+                chan = 1
+                note = {16: 36, 17: 40, 18: 44}[i]
+            else:
+                chan = 0
+                note = i + 69 - 24
+            alsaseq.output(alsamidi.noteoffevent(chan, note, 100))
+            if x > .4:
+                notes_to_output[chan].append((x, note))
+        for chan, notes in notes_to_output.items():
+            if len(notes) > 3:
+                notes = sorted(notes)[:3]
+            for _, note in notes:
+                alsaseq.output(alsamidi.noteonevent(chan, note, 100))
+        time.sleep(sleep)
+
+    last_time = time.time()
+
+
+def music():
+    global esn, visualiser
+
     train_skip = sys.argv[1]
     test_skip = sys.argv[2]
-    n_forget_points = 0
+
     input, output, esn = test_data.music()
+    n_forget_points = 0
 
-    app = wx.App()
-    visualiser = Visualiser(esn)
-
-    visualiser.Show()
-
-    visualiser.Update()
-
-    import alsaseq, alsamidi, time
     alsaseq.client('andreas', 1, 1, True)
     alsaseq.connectto(1, 20, 0)
     alsaseq.start()
 
-    def refresh(data=None):
-        return
-        while app.Pending():
-            app.Dispatch()
-        if data is not None:
-            visualiser.on_training_update(data)
-
-    last_time = None
-    def refresh_midi(data=None):
-        global last_time
-        this_time = time.time()
-        if last_time is None:
-            last_time = this_time
-        sleep = max(0, .2 - (this_time - last_time))
-
-        print sleep
-            
-        while app.Pending():
-            app.Dispatch()
-        if data is not None:
-            visualiser.on_training_update(data)
-            out = data[-1, -esn.n_output_units:]
-            out = (out - esn.teacher_shift) / esn.teacher_scaling
-            notes_to_output = collections.defaultdict(list)
-            for i, x in enumerate(out):
-                if i > 18:
-                    chan = 2
-                    note = {19: 29, 20: 31, 21: 33}[i]
-                elif i > 15:
-                    chan = 1
-                    note = {16: 36, 17: 40, 18: 44}[i]
-                else:
-                    chan = 0
-                    note = i + 69 - 24
-                alsaseq.output(alsamidi.noteoffevent(chan, note, 100))
-                if x > .4:
-                    notes_to_output[chan].append((x, note))
-            for chan, notes in notes_to_output.items():
-                if len(notes) > 3:
-                    notes = sorted(notes)[:3]
-                for _, note in notes:
-                    alsaseq.output(alsamidi.noteonevent(chan, note, 100))
-            time.sleep(sleep)
-
-        last_time = time.time()
+    visualiser = Visualiser(esn)
 
 #    state_matrix = esn.train(input, output, callback=refresh_midi, n_forget_points=n_forget_points, callback_every=int(train_skip))
-    import cPickle
+
     with open(sys.argv[3]) as f:
         esn.unserialize(cPickle.load(f))
+
     visualiser.set_weights()
     esn.reset_state()
+
     esn.noise_level = 0
+
     print 'test'
     estimated_output = esn.test(input, callback=refresh_midi, n_forget_points=n_forget_points, callback_every=int(test_skip))
 
     error = np.sum(nrmse(estimated_output, output))
     print 'error: %s' % error
 
-    visualiser.Close()
-    refresh()
+
+def instrumentalness():
+    global esn, visualiser
+
+    train_skip = sys.argv[1]
+    test_skip = sys.argv[2]
+    n_forget_points = 10
+
+    train_inputs, train_outputs, test_inputs, test_outputs, esn = test_data.instrumentalness()
+
+    visualiser = Visualiser(esn)
+
+    state_matrix = esn.train_multiple(train_inputs, train_outputs, callback=refresh, n_forget_points=n_forget_points, callback_every=int(train_skip))
+
+    visualiser.set_weights()
+    esn.reset_state()
+
+    esn.noise_level = 0
+
+    input = test_inputs[0]
+    output = test_outputs[0]
+
+    print 'test'
+    estimated_output = esn.test(input, callback=refresh, n_forget_points=n_forget_points, callback_every=int(test_skip))
+
+    error = np.sum(nrmse(estimated_output, output))
+    print 'error: %s' % error
+
+    plt.plot(output[n_forget_points:])
+    plt.plot(estimated_output)
+    plt.show()
+
+
+if __name__ == '__main__':
+    # waveform=sin
+    # train_skip=400
+    # test_skip=400
+
+    app = wx.App()
+    instrumentalness()
+
 
 #    scikits.audiolab.play(estimated_output.T / max(abs(estimated_output)), fs=test_data.SR)
-
-#    plt.plot(output[n_forget_points:])
-#    plt.plot(estimated_output)
-#    plt.plot(output[n_forget_points:, 7])
-#    plt.plot(estimated_output[:, 7])
-#    plt.plot(np.argmax(output[n_forget_points:], 1))
-#    plt.plot(np.argmax(estimated_output, 1))
-
-#    plt.show()

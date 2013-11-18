@@ -2,6 +2,7 @@ import numpy as np
 import scipy.sparse
 import matplotlib.pyplot as plt
 import copy
+import itertools
 import cma
 
 class EchoStateNetwork(object):
@@ -101,6 +102,30 @@ class EchoStateNetwork(object):
         output /= self.teacher_scaling
 
         return output
+
+    def train_multiple(self, inputs, outputs, n_forget_points=0, callback=None, callback_every=None):
+        assert len(inputs) == len(outputs)
+        state_matrix = None
+        teacher_matrix = None
+        for input, output in itertools.izip(inputs, outputs):
+            assert input.shape[1] == self.n_input_units
+            assert output.shape[1] == self.n_output_units
+
+            local_state_matrix = self._compute_state_matrix(input, output, n_forget_points,
+                                                            callback=callback, callback_every=callback_every)
+            local_teacher_matrix = self._compute_teacher_matrix(output, n_forget_points)
+
+            if state_matrix is None:
+                state_matrix = local_state_matrix
+                teacher_matrix = local_teacher_matrix
+            else:
+                state_matrix = np.vstack((state_matrix, local_state_matrix))
+                teacher_matrix = np.vstack((teacher_matrix, local_teacher_matrix))
+
+            self.reset_state()
+
+        self.output_weights = self._linear_regression_wiener_hopf(state_matrix, teacher_matrix)
+        return state_matrix
 
     def _compute_state_matrix(self, input, output=None, n_forget_points=0,
                               callback=None, callback_every=None):

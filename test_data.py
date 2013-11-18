@@ -1,6 +1,9 @@
 import numpy as np
 import collections
 import simplejson as json
+import itertools
+import glob
+import random
 
 from esn import NeighbourESN
 
@@ -179,52 +182,77 @@ def test_data3(waveform, sequence_length=10000, min_pitch=30, max_pitch=60, sr=S
     return pitches, audio, esn
 
 
-def instrumentalness():
-    trid = 'TRMTLMZ1379DF01BFE'
-    segments_filename = '/home/andreas/r/instrumentalness/segments/%s.json' % trid
-    with open(segments_filename, 'r') as f:
-        segments = json.load(f)
+def instrumentalness(n_train=50, n_test=1):
+    segment_dir = '/home/andreas/r/instrumentalness/segments'
+    vocal_dir = '/home/andreas/r/instrumentalness/slicing/full_tracks'
 
-    vocal_segments_filename = '/home/andreas/r/instrumentalness/slicing/full_tracks/%s.csv' % trid
-    vocal_segments = []
-    with open(vocal_segments_filename, 'r') as f:
-        for line in f:
-            line = line.strip()
-            split = line.split(',')
-            start = float(split[0])
-            duration = float(split[-1])
-            vocal_segments.append((start, duration))
+    segment_filenames = sorted(glob.glob('%s/*.json' % segment_dir))[:n_train + n_test]
+    vocal_filenames = sorted(glob.glob('%s/*.csv' % vocal_dir))[:n_train + n_test]
+    random_ndx = range(len(segment_filenames))
+    random.shuffle(random_ndx)
+    segment_filenames = [segment_filenames[i] for i in random_ndx]
+    vocal_filenames = [vocal_filenames[i] for i in random_ndx]
 
-    vocal_ndx = 0
-    for segment in segments:
-        time = segment['start']
-        start, duration = vocal_segments[vocal_ndx]
-        while time > start + duration and vocal_ndx < len(vocal_segments) - 1:
-            vocal_ndx += 1
+    inputs = []
+    outputs = []
+    assert len(segment_filenames) == len(vocal_filenames)
+    for segment_filename, vocal_filename in itertools.izip(segment_filenames, vocal_filenames):
+
+        with open(segment_filename, 'r') as f:
+            segments = json.load(f)
+
+        vocal_segments = []
+        with open(vocal_filename, 'r') as f:
+            for line in f:
+                line = line.strip()
+                split = line.split(',')
+                start = float(split[0])
+                duration = float(split[-1])
+                vocal_segments.append((start, duration))
+
+        vocal_ndx = 0
+        for segment in segments:
+            if len(vocal_segments) == 0:
+                segment['vocal'] = False
+                continue
+
+            time = segment['start']
             start, duration = vocal_segments[vocal_ndx]
-        segment['vocal'] = time > start and time < start + duration
+            while time > start + duration and vocal_ndx < len(vocal_segments) - 1:
+                vocal_ndx += 1
+                start, duration = vocal_segments[vocal_ndx]
+            segment['vocal'] = time > start and time < start + duration
 
-    timbres = np.array([s['timbre'] for s in segments])
-    vocal = np.array([float(s['vocal']) for s in segments]).reshape((len(segments), 1))
+        timbres = np.array([s['timbre'] for s in segments])
+        vocal = np.array([float(s['vocal']) for s in segments]).reshape((len(segments), 1))
+
+        inputs.append(timbres)
+        outputs.append(vocal)
+
+    train_inputs, test_inputs = inputs[:n_train], inputs[n_train:]
+    train_outputs, test_outputs = outputs[:n_train], outputs[n_train:]
+
+    n_input_units = 12
+    width = height = 6
 
     esn = NeighbourESN(
-        n_input_units=12,
-        width=7,
-        height=7,
+        n_input_units=n_input_units,
+        width=width,
+        height=height,
         n_output_units=1,
-        input_scaling=[.02] * 12,
-        input_shift=[0] * 12,
+        input_scaling=[.02] * n_input_units,
+        input_shift=[0] * n_input_units,
         teacher_scaling=[1.2],
         teacher_shift=[-.6],
         noise_level=0.002,
-        spectral_radius=0.5,
-        feedback_scaling=[.9],
+        spectral_radius=0.9,
+        feedback_scaling=[.5],
         output_activation_function='identity',
-        leakage=.5,
-        time_constants=np.ones((7 * 7, 1)),
+        leakage=1,
+        time_constants=np.ones((width * height, 1)),
     )
 
-    return timbres, vocal, esn
+    return train_inputs, train_outputs, test_inputs, test_outputs, esn
 
 
 def music():
