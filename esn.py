@@ -427,5 +427,3 @@ class GeneticOptimiser(object):
 
         print error
         return error
-
-
