@@ -7,7 +7,7 @@ import test_data
 
 if __name__ == '__main__':
 
-    input, output, network = test_data.bach()
+    input, output, network = test_data.instrumentalness()
 
     optimiser = esn.GeneticOptimiser(network, input, output, 0)
     params = np.array(optimiser.initial_params())
