@@ -17,8 +17,7 @@ def genetic_search():
         cPickle.dump(network.serialize(), f)
 
 def random_search():
-    #train_input, train_output, train_splits, test_input, test_output, test_splits, network = test_data.instrumentalness()
-    train_input, train_output, network = test_data.instrumentalness()
+    train_input, train_output, train_splits, test_input, test_output, test_splits, network = test_data.instrumentalness()
 
     optimiser = esn.GeneticOptimiser(network, train_input, train_output, 0)
     while True:
