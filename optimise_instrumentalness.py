@@ -10,7 +10,7 @@ def genetic_search():
 
     optimiser = esn.GeneticOptimiser(network, train_input, train_output, 0)
     params = np.array(optimiser.initial_params())
-    res = cma.fmin(optimiser.evaluate, params, 0.1, maxiter=1)
+    res = cma.fmin(optimiser.evaluate, params, 0.1, maxiter=20)
 
     filename = '/parent/best_esn_%s.pkl' % res[1]
     with open(filename, 'w') as f:
