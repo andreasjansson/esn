@@ -7,16 +7,14 @@ import sys
 import random
 import matplotlib.pyplot as plt
 import numpy as np
-import scikits.audiolab
-import alsaseq, alsamidi
 import cPickle
 
-from esn import NeighbourESN, optimise, nrmse
+from esn import NeighbourESN, nrmse, mean_error, OnlineNeighbourESN
 import test_data
 
 class Visualiser(wx.Frame):
 
-    def __init__(self, neighbour_esn):
+    def __init__(self, neighbour_esn, input_yscale=.2, internal_yscale=0.5, output_yscale=1):
         super(Visualiser, self).__init__(None, -1, 'esn',
         style=wx.DEFAULT_FRAME_STYLE ^ wx.RESIZE_BORDER)
         #self.SetDoubleBuffered(True)
@@ -27,6 +25,10 @@ class Visualiser(wx.Frame):
         self.internal_neurons = {}
         self.output_neurons = {}
         self.internal_synapses = {}
+
+        self.input_yscale = input_yscale
+        self.internal_yscale = internal_yscale
+        self.output_yscale = output_yscale
 
         self.main_panel = wx.Panel(self)
         self.main_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -51,7 +53,7 @@ class Visualiser(wx.Frame):
 
         for col in range(cols):
             if col % 2 == 0:
-                neuron = Neuron(panel, yscale=.5, history_length=300 / cols)
+                neuron = Neuron(panel, yscale=self.input_yscale, history_length=300 / cols)
                 self.input_neurons[col / 2] = neuron
                 sizer.Add(neuron, flag=wx.EXPAND)
             else:
@@ -68,7 +70,7 @@ class Visualiser(wx.Frame):
 
         for col in range(cols):
             if col % 2 == 0:
-                neuron = Neuron(panel, yscale=3, history_length=300 / cols)
+                neuron = Neuron(panel, yscale=self.output_yscale, history_length=300 / cols)
                 self.output_neurons[col / 2] = neuron
                 sizer.Add(neuron, flag=wx.EXPAND)
             else:
@@ -91,7 +93,7 @@ class Visualiser(wx.Frame):
                     x = col / 2
 
                 if col % 2 == 0 and row % 2 == 0:
-                    neuron = Neuron(panel)
+                    neuron = Neuron(panel, yscale=self.internal_yscale)
                     self.internal_neurons[(x, y)] = neuron
                     sizer.Add(neuron, flag=wx.EXPAND)
 
@@ -164,10 +166,14 @@ class Visualiser(wx.Frame):
             synapse_group.set_weight(((x1, y1), (x2, y2)), weight)
 
         for (x, y), neuron in self.internal_neurons.iteritems():
-            weight = self.esn.get_output_weight(0, x, y)
+            weight = self.esn.get_internal_to_output_weight(0, x, y)
             neuron.weight = weight
 
-    def on_training_update(self, data):
+        for i, neuron in self.input_neurons.iteritems():
+            weight = self.esn.get_input_to_output_weight(0, i)
+            neuron.weight = weight
+
+    def on_training_update(self, data, actual_output=None):
 
         for i, neuron in self.input_neurons.iteritems():
             neuron.set_activations(data[:, i])
@@ -176,7 +182,11 @@ class Visualiser(wx.Frame):
             neuron.set_activations(data[:, self.esn.n_input_units + self.esn.point_to_index(x, y)])
             
         for i, neuron in self.output_neurons.iteritems():
-            neuron.set_activations(data[:, self.esn.n_input_units + self.esn.n_internal_units + i])
+            activations = data[:, self.esn.n_input_units + self.esn.n_internal_units + i]
+            if actual_output is not None:
+                neuron.set_activations(activations, actual_output[:, i])
+            else:
+                neuron.set_activations(activations)
 
         self.Update()
 
@@ -259,11 +269,12 @@ class SynapseGroup(Sprite):
 
 class Neuron(Sprite):
 
-    def __init__(self, parent, yscale=.5, history_length=50):
+    def __init__(self, parent, yscale=.5, history_length=20):
         super(Neuron, self).__init__(parent)
 
         self.history_length = history_length
         self.history = collections.deque(maxlen=self.history_length)
+        self.secondary_history = None
         self.weight = 0
         self.yscale = yscale
 
@@ -272,7 +283,12 @@ class Neuron(Sprite):
         self.dirty = True
 #        self.Refresh()
 
-    def set_activations(self, history):
+    def set_activations(self, history, secondary_history=None):
+        if secondary_history is not None:
+            if self.secondary_history is None:
+                self.secondary_history = collections.deque(maxlen=self.history_length)
+            self.secondary_history.extend(secondary_history[-self.history_length:])
+
         self.history.extend(history[-self.history_length:])
         self.repaint()
 
@@ -291,10 +307,21 @@ class Neuron(Sprite):
         dc.SetPen(pen)
         dc.DrawRectangle(0, 0, w, h)
 
-        dc.SetPen(wx.Pen(wx.BLACK))
-
         yscale = - min(w, h) * self.yscale
         yshift = h / 2
+
+        dc.SetPen(wx.Pen(wx.RED))
+
+        if self.secondary_history is not None:
+            for i in xrange(len(self.history) - 1):
+                x1 = w * i / float(self.history_length)
+                y1 = self.secondary_history[i] * yscale + yshift
+                x2 = w * (i + 1) / float(self.history_length)
+                y2 = self.secondary_history[i + 1] * yscale + yshift
+                dc.DrawLine(x1, y1, x2, y2)
+            
+        dc.SetPen(wx.Pen(wx.BLACK))
+
         for i in xrange(len(self.history) - 1):
             x1 = w * i / float(self.history_length)
             y1 = self.history[i] * yscale + yshift
@@ -307,15 +334,20 @@ app = None
 visualiser = None
 esn = None
 
-def refresh(data=None):
+def refresh(data=None, actual_output=None):
     while app.Pending():
         app.Dispatch()
     if data is not None:
-        visualiser.on_training_update(data)
+        visualiser.on_training_update(data, actual_output)
+        visualiser.set_weights()
 
 last_time = None
 def refresh_midi(data=None):
     global last_time
+
+    import scikits.audiolab
+    import alsaseq, alsamidi
+    
     this_time = time.time()
     if last_time is None:
         last_time = this_time
@@ -331,27 +363,29 @@ def refresh_midi(data=None):
         out = (out - esn.teacher_shift) / esn.teacher_scaling
         notes_to_output = collections.defaultdict(list)
         for i, x in enumerate(out):
-            if i > 18:
-                chan = 2
-                note = {19: 29, 20: 31, 21: 33}[i]
-            elif i > 15:
-                chan = 1
-                note = {16: 36, 17: 40, 18: 44}[i]
-            else:
-                chan = 0
-                note = i + 69 - 24
+            # if i > 18:
+            #     chan = 2
+            #     note = {19: 29, 20: 31, 21: 33}[i]
+            # elif i > 15:
+            #     chan = 1
+            #     note = {16: 36, 17: 40, 18: 44}[i]
+            # else:
+            #     chan = 0
+            #     note = i + 69 - 24
+            chan = 0
+            note = i + 40
             alsaseq.output(alsamidi.noteoffevent(chan, note, 100))
-            if x > .4:
+            if x > .5:
                 notes_to_output[chan].append((x, note))
         for chan, notes in notes_to_output.items():
             if len(notes) > 3:
                 notes = sorted(notes)[:3]
             for _, note in notes:
                 alsaseq.output(alsamidi.noteonevent(chan, note, 100))
+        drawing_time = time.time() - this_time
         time.sleep(sleep)
 
-    last_time = time.time()
-
+    last_time = time.time() - drawing_time
 
 def music():
     global esn, visualiser
@@ -359,7 +393,7 @@ def music():
     train_skip = sys.argv[1]
     test_skip = sys.argv[2]
 
-    input, output, esn = test_data.music()
+    input, output, esn = test_data.bach()
     n_forget_points = 0
 
     alsaseq.client('andreas', 1, 1, True)
@@ -368,10 +402,12 @@ def music():
 
     visualiser = Visualiser(esn)
 
-#    state_matrix = esn.train(input, output, callback=refresh_midi, n_forget_points=n_forget_points, callback_every=int(train_skip))
+    if len(sys.argv) < 4:
+        state_matrix = esn.train(input, output, n_forget_points=n_forget_points, callback_every=int(train_skip), callback=refresh_midi)
 
-    with open(sys.argv[3]) as f:
-        esn.unserialize(cPickle.load(f))
+    else:
+        with open(sys.argv[3]) as f:
+            esn.unserialize(cPickle.load(f))
 
     visualiser.set_weights()
     esn.reset_state()
@@ -381,7 +417,7 @@ def music():
     print 'test'
     estimated_output = esn.test(input, callback=refresh_midi, n_forget_points=n_forget_points, callback_every=int(test_skip))
 
-    error = np.sum(nrmse(estimated_output, output))
+    error = nrmse(estimated_output, output)
     print 'error: %s' % error
 
 
@@ -390,30 +426,75 @@ def instrumentalness():
 
     train_skip = sys.argv[1]
     test_skip = sys.argv[2]
-    n_forget_points = 10
+    n_forget_points = 0
 
-    train_inputs, train_outputs, test_inputs, test_outputs, esn = test_data.instrumentalness()
+    train_input, train_output, train_splits, test_input, test_output, test_splits, esn = test_data.instrumentalness()
 
-    visualiser = Visualiser(esn)
+    visualiser = Visualiser(esn, output_yscale=.3)
 
-    state_matrix = esn.train_multiple(train_inputs, train_outputs, callback=refresh, n_forget_points=n_forget_points, callback_every=int(train_skip))
+    esn.train(train_input, train_output, callback=refresh, n_forget_points=n_forget_points, callback_every=int(train_skip), reset_points=train_splits)
 
     visualiser.set_weights()
     esn.reset_state()
 
     esn.noise_level = 0
 
-    input = test_inputs[0]
-    output = test_outputs[0]
+    #test_input, test_output, test_splits = train_input, train_output, train_splits
 
     print 'test'
-    estimated_output = esn.test(input, callback=refresh, n_forget_points=n_forget_points, callback_every=int(test_skip))
+    estimated_output = esn.test(test_input, n_forget_points=n_forget_points, callback_every=int(test_skip), callback=refresh, reset_points=test_splits, actual_output=test_output * esn.teacher_scaling + esn.teacher_shift)
 
-    error = np.sum(nrmse(estimated_output, output))
+    error = nrmse(estimated_output, test_output)
+    print 'error: %s' % error
+
+    means = []
+    estimated_means = []
+    for start, end in zip(test_splits[:-1], test_splits[1:]):
+        means.append(np.mean(test_output[start:end]))
+        estimated_means.append(np.mean(estimated_output[start:end]))
+
+    plt.plot(means, 'go', markersize=10)
+    plt.plot(estimated_means, 'r*', markersize=10)
+
+    for i, (out, est) in enumerate(zip(means, estimated_means)):
+        if out > est:
+            col = 'c'
+        else:
+            col = 'y'
+            
+        i /= float(len(means))
+        plt.axhspan(out, est, i - .005, i + 0.005, color=col)
+
+    plt.show()
+
+def generic():
+    global esn, visualiser
+
+    train_skip = sys.argv[1]
+    test_skip = sys.argv[2]
+    n_forget_points = 0
+
+    input, output, esn = test_data.scholarpedia()
+
+    visualiser = Visualiser(esn)
+
+    state_matrix = esn.train(input, output, callback=refresh, n_forget_points=n_forget_points,
+                             callback_every=int(train_skip))
+
+    visualiser.set_weights()
+    esn.reset_state()
+
+    esn.noise_level = 0
+
+    print 'test'
+    estimated_output = esn.test(input, n_forget_points=n_forget_points, callback_every=int(test_skip), callback=refresh)
+
+    error = nrmse(estimated_output, output)
     print 'error: %s' % error
 
     plt.plot(output[n_forget_points:])
     plt.plot(estimated_output)
+
     plt.show()
 
 
@@ -424,6 +505,8 @@ if __name__ == '__main__':
 
     app = wx.App()
     instrumentalness()
+    #music()
+    #generic()
 
 
 #    scikits.audiolab.play(estimated_output.T / max(abs(estimated_output)), fs=test_data.SR)

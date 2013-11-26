@@ -1,4 +1,4 @@
-from esn import EchoStateNetwork, optimise, NeighbourESN, GeneticOptimiser, fmin
+from esn import EchoStateNetwork, NeighbourESN, GeneticOptimiser
 import unittest2 as unittest
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,42 +8,6 @@ import fluidsynth
 import struct
 
 SR = 4000
-
-def scholarpedia_esn():
-    return EchoStateNetwork(
-        n_input_units=2,
-        n_internal_units=200,
-        n_output_units=1,
-        connectivity=0.05,
-        input_scaling=[0.01, 3],
-        input_shift=[0, 0],
-        teacher_scaling=[1.4],
-        teacher_shift=[-0.7],
-        noise_level=0.001,
-        spectral_radius=0.25,
-        feedback_scaling=[0.8],
-    )
-
-def scholarpedia_data(sequence_length=5000, out_min_period=4, out_max_period=16):
-    out_period_setting = np.zeros((sequence_length, 1))
-    current_value = np.random.rand()
-    for i in xrange(sequence_length):
-        if np.random.rand() < 0.015:
-            current_value = np.random.rand()
-        out_period_setting[i, 0] = current_value
-
-    ones = np.ones(sequence_length).reshape((sequence_length, 1))
-    input = np.hstack((ones, 1 - out_period_setting))
-
-    current_sin_arg = 0
-    output = np.zeros((sequence_length, 1))
-    for i in xrange(1, sequence_length):
-        current_out_period_length = out_period_setting[i-1, 0] * (out_max_period - out_min_period) + out_min_period
-        current_sin_arg = current_sin_arg + 2 * np.pi / current_out_period_length
-        output[i, 0] = (np.sin(current_sin_arg) + 1) / 2
-
-    return input, output
-
 
 def my_multiclass_esn():
     n_out = 3
@@ -367,21 +331,19 @@ class TestNeighbourESN(unittest.TestCase):
 
 class TestOptimise(unittest.TestCase):
 
-    def test_optimise(self):
-        import visualise
+    def test_optimise_bach(self):
         import test_data
         import cma
         import cPickle
 
-        input, output, esn = test_data.music()
+        input, output, esn = test_data.bach()
 
         optimiser = GeneticOptimiser(esn, input, output, 0)
         params = np.array(optimiser.initial_params())
         res = cma.fmin(optimiser.evaluate, params, 0.1, maxiter=20)
         #res = fmin(optimiser.evaluate, params)
-        with open('best_esn_%s.pkl' % res[1], 'w') as f:
+        with open('best_esn_bach_%s.pkl' % res[1], 'w') as f:
             cPickle.dump(esn.serialize(), f)
-
 
 def play(stream, output):
     output = output - (np.max(output) + np.min(output)) / 2.0

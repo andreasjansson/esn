@@ -5,9 +5,60 @@ import itertools
 import glob
 import random
 
-from esn import NeighbourESN
+from esn import NeighbourESN, EchoStateNetwork, OnlineNeighbourESN
 
 SR = 6000
+
+def scholarpedia(sequence_length=20000, out_min_period=4, out_max_period=16):
+
+    # esn = EchoStateNetwork(
+    #     n_input_units=2,
+    #     n_internal_units=200,
+    #     n_output_units=1,
+    #     connectivity=0.05,
+    #     input_scaling=[0.01, 3],
+    #     input_shift=[0, 0],
+    #     teacher_scaling=[1.4],
+    #     teacher_shift=[-0.7],
+    #     noise_level=0.001,
+    #     spectral_radius=0.25,
+    #     feedback_scaling=[0.8],
+    # )
+
+    esn = NeighbourESN(
+        n_input_units=2,
+        width=14,
+        height=14,
+        n_output_units=1,
+        input_scaling=[0.01, 1],
+        input_shift=[0, -.5],
+        teacher_scaling=[1.4],
+        teacher_shift=[-0.7],
+        noise_level=0.001,
+        spectral_radius=.25,
+        feedback_scaling=[0.9],
+        output_activation_function='identity',
+    )
+
+    out_period_setting = np.zeros((sequence_length, 1))
+    current_value = np.random.rand()
+    for i in xrange(sequence_length):
+        if np.random.rand() < 0.015:
+            current_value = np.random.rand()
+        out_period_setting[i, 0] = current_value
+
+    ones = np.ones(sequence_length).reshape((sequence_length, 1))
+    input = np.hstack((ones, 1 - out_period_setting))
+
+    current_sin_arg = 0
+    output = np.zeros((sequence_length, 1))
+    for i in xrange(1, sequence_length):
+        current_out_period_length = out_period_setting[i-1, 0] * (out_max_period - out_min_period) + out_min_period
+        current_sin_arg = current_sin_arg + 2 * np.pi / current_out_period_length
+        output[i, 0] = (np.sin(current_sin_arg) + 1) / 2
+
+    return input, output, esn
+
 
 def test_data1(sequence_length=10000, min_freq=20, max_freq=100, sr=SR):
 
@@ -182,58 +233,75 @@ def test_data3(waveform, sequence_length=10000, min_pitch=30, max_pitch=60, sr=S
     return pitches, audio, esn
 
 
-def instrumentalness(n_train=50, n_test=1):
+def instrumentalness(n_train=100, n_test=100, deterministic=False):
     segment_dir = '/home/andreas/r/instrumentalness/segments'
     vocal_dir = '/home/andreas/r/instrumentalness/slicing/full_tracks'
 
-    segment_filenames = sorted(glob.glob('%s/*.json' % segment_dir))[:n_train + n_test]
-    vocal_filenames = sorted(glob.glob('%s/*.csv' % vocal_dir))[:n_train + n_test]
+    segment_filenames = sorted(glob.glob('%s/*.json' % segment_dir))
+    vocal_filenames = sorted(glob.glob('%s/*.csv' % vocal_dir))
     random_ndx = range(len(segment_filenames))
-    random.shuffle(random_ndx)
+
+    if not deterministic:
+        random.shuffle(random_ndx)
+
+    random_ndx = random_ndx[:n_train + n_test]
     segment_filenames = [segment_filenames[i] for i in random_ndx]
     vocal_filenames = [vocal_filenames[i] for i in random_ndx]
 
-    inputs = []
-    outputs = []
     assert len(segment_filenames) == len(vocal_filenames)
-    for segment_filename, vocal_filename in itertools.izip(segment_filenames, vocal_filenames):
 
-        with open(segment_filename, 'r') as f:
-            segments = json.load(f)
+    def get_input_output_splits(segment_filenames, vocal_filenames):
+        input = output = None
+        splits = [0]
+        t = 0
+        for segment_filename, vocal_filename in itertools.izip(
+                segment_filenames, vocal_filenames):
 
-        vocal_segments = []
-        with open(vocal_filename, 'r') as f:
-            for line in f:
-                line = line.strip()
-                split = line.split(',')
-                start = float(split[0])
-                duration = float(split[-1])
-                vocal_segments.append((start, duration))
+            with open(segment_filename, 'r') as f:
+                segments = json.load(f)
 
-        vocal_ndx = 0
-        for segment in segments:
-            if len(vocal_segments) == 0:
-                segment['vocal'] = False
-                continue
+            vocal_segments = []
+            with open(vocal_filename, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    split = line.split(',')
+                    start = float(split[0])
+                    duration = float(split[-1])
+                    vocal_segments.append((start, duration))
 
-            time = segment['start']
-            start, duration = vocal_segments[vocal_ndx]
-            while time > start + duration and vocal_ndx < len(vocal_segments) - 1:
-                vocal_ndx += 1
+            vocal_ndx = 0
+            for segment in segments:
+                if len(vocal_segments) == 0:
+                    segment['vocal'] = False
+                    continue
+ 
+                time = segment['start']
                 start, duration = vocal_segments[vocal_ndx]
-            segment['vocal'] = time > start and time < start + duration
+                while time > start + duration and vocal_ndx < len(vocal_segments) - 1:
+                    vocal_ndx += 1
+                    start, duration = vocal_segments[vocal_ndx]
+                segment['vocal'] = time > start and time < start + duration
 
-        timbres = np.array([s['timbre'] for s in segments])
-        vocal = np.array([float(s['vocal']) for s in segments]).reshape((len(segments), 1))
+            timbres = np.array([s['timbre'] for s in segments])
+            vocal = np.array([float(s['vocal']) for s in segments]).reshape((len(segments), 1))
 
-        inputs.append(timbres)
-        outputs.append(vocal)
+            t += len(segments)
 
-    train_inputs, test_inputs = inputs[:n_train], inputs[n_train:]
-    train_outputs, test_outputs = outputs[:n_train], outputs[n_train:]
+            if input is None:
+                input = timbres
+                output = vocal
+            else:
+                input = np.vstack((input, timbres))
+                output = np.vstack((output, vocal))
+            splits.append(t)
+
+        return input, output, splits
+
+    train_input, train_output, train_splits = get_input_output_splits(segment_filenames[:n_train], vocal_filenames[:n_train])
+    test_input, test_output, test_splits = get_input_output_splits(segment_filenames[n_train:], vocal_filenames[n_train:])
 
     n_input_units = 12
-    width = height = 6
+    width = height = 8
 
     esn = NeighbourESN(
         n_input_units=n_input_units,
@@ -241,18 +309,16 @@ def instrumentalness(n_train=50, n_test=1):
         height=height,
         n_output_units=1,
         input_scaling=[.02] * n_input_units,
-        input_shift=[0] * n_input_units,
+        input_shift=[-.05] * n_input_units,
         teacher_scaling=[1.2],
         teacher_shift=[-.6],
         noise_level=0.002,
-        spectral_radius=0.9,
-        feedback_scaling=[.5],
-        output_activation_function='identity',
-        leakage=1,
-        time_constants=np.ones((width * height, 1)),
+        spectral_radius=.9,
+        feedback_scaling=[1],
+        output_activation_function='tanh',
     )
 
-    return train_inputs, train_outputs, test_inputs, test_outputs, esn
+    return train_input, train_output, train_splits, test_input, test_output, test_splits, esn
 
 
 def music():
@@ -323,3 +389,66 @@ def music():
     esn.input_weights[width - 1, 1] = 1
 
     return input, output, esn
+
+def bach():
+    import midi
+
+    m = midi.read_midifile('muss_1.mid')
+    m.make_ticks_abs()
+    notes = [(n.pitch, int(round(n.tick / 120.0))) for n in m[1] if type(n) == midi.events.NoteOnEvent and n.velocity > 0]
+
+    note_map = collections.defaultdict(list)
+    max_pitch = 0
+    min_pitch = 127
+    for pitch, time in notes:
+        note_map[time].append(pitch)
+        if pitch > max_pitch:
+            max_pitch = pitch
+        elif pitch < min_pitch:
+            min_pitch = pitch
+
+    input_units = 1
+
+    max_time = max(note_map.keys())
+    #max_time = 32 * input_units
+    max_time = 140
+
+    output_units = max_pitch - min_pitch + 1
+    output = np.zeros((max_time, output_units))
+    for t in range(max_time):
+        if t in note_map:
+            for i in note_map[t]:
+                output[t, i - min_pitch] = 1
+
+    input = np.zeros((max_time, input_units))
+    for i in range(input_units):
+        input[32 * i: 32 * (i + 1), i] = 1
+    input = np.zeros((max_time, input_units))
+
+    input[:,0] = np.arange(max_time) / (float(max_time))
+    input[:,0] = np.ones((max_time))
+
+    width = height = 8
+    esn = NeighbourESN(
+        n_input_units=input_units,
+        width=width,
+        height=height,
+        n_output_units=output_units,
+#        input_scaling=[.001],
+        input_scaling=[1] * input_units,
+        input_shift=[-.5] * input_units,
+        teacher_scaling=[.2] * output_units,
+        teacher_shift=[-.1] * output_units,
+        noise_level=0.02,
+        spectral_radius=.25,
+        feedback_scaling=[.1] * output_units,
+#        feedback_scaling=[0] * output_units,
+        output_activation_function='tanh',
+    )
+
+#    esn.input_weights = np.zeros((esn.n_internal_units, esn.n_input_units))
+#    esn.input_weights[0, 0] = 1
+#    esn.input_weights[width - 1, 0] = 1
+
+    return input, output, esn
+    

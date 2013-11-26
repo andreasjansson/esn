@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import copy
 import itertools
 import cma
+#from profilestats import profile
 
 class EchoStateNetwork(object):
 
@@ -81,21 +82,23 @@ class EchoStateNetwork(object):
         self.feedback_weights = obj['feedback_weights']
         self.output_weights = obj['output_weights']
 
-    def train(self, input, output, n_forget_points=0, callback=None, callback_every=None):
+    #@profile
+    def train(self, input, output, n_forget_points=0, callback=None, callback_every=None, reset_points=None):
         assert len(input) == len(output)
         assert input.shape[1] == self.n_input_units
         assert output.shape[1] == self.n_output_units
 
         state_matrix = self._compute_state_matrix(input, output, n_forget_points,
-                                                  callback=callback, callback_every=callback_every)
+                                                  callback=callback, callback_every=callback_every, reset_points=reset_points)
         teacher_matrix = self._compute_teacher_matrix(output, n_forget_points)
         self.output_weights = self._linear_regression_wiener_hopf(state_matrix, teacher_matrix)
 
         return state_matrix
 
-    def test(self, input, n_forget_points=0, callback=None, callback_every=None):
+    def test(self, input, n_forget_points=0, callback=None, callback_every=None, reset_points=None, actual_output=None):
         state_matrix = self._compute_state_matrix(input, n_forget_points=n_forget_points,
-                                                  callback=callback, callback_every=callback_every)
+                                                  callback=callback, callback_every=callback_every,
+                                                  reset_points=reset_points, actual_output=actual_output)
         output = state_matrix.dot(self.output_weights.T)
         output = self.output_activation_function(output)
         output -= self.teacher_shift
@@ -107,7 +110,8 @@ class EchoStateNetwork(object):
         assert len(inputs) == len(outputs)
         state_matrix = None
         teacher_matrix = None
-        for input, output in itertools.izip(inputs, outputs):
+        for i, (input, output) in enumerate(itertools.izip(inputs, outputs)):
+            print i
             assert input.shape[1] == self.n_input_units
             assert output.shape[1] == self.n_output_units
 
@@ -125,17 +129,24 @@ class EchoStateNetwork(object):
             self.reset_state()
 
         self.output_weights = self._linear_regression_wiener_hopf(state_matrix, teacher_matrix)
-        return state_matrix
+        return state_matrix, teacher_matrix
 
     def _compute_state_matrix(self, input, output=None, n_forget_points=0,
-                              callback=None, callback_every=None):
+                              callback=None, callback_every=None, reset_points=None, actual_output=None):
         state_matrix = np.zeros((len(input) - n_forget_points,
                                  self.n_input_units + self.n_internal_units))
 
         if callback:
             callback_state = np.zeros((callback_every, self.n_input_units + self.n_internal_units + self.n_output_units))
 
+        if reset_points is not None:
+            reset_points = set(reset_points)
+
         for i, input_point in enumerate(input):
+
+            if reset_points is not None and i in reset_points:
+                self.reset_state()
+
             scaled_input = (self.input_scaling * input_point + self.input_shift).reshape(
                 len(input_point), 1)
 
@@ -162,7 +173,11 @@ class EchoStateNetwork(object):
             if callback:
                 callback_state[i % callback_every,:] = np.vstack((scaled_input, self.internal_state, scaled_output)).T
                 if (i + 1) % callback_every == 0:
-                    callback(callback_state)
+                    print i, len(input)
+                    if actual_output is not None:
+                        callback(callback_state, actual_output[max(0, i - callback_every):i, :])
+                    else:
+                        callback(callback_state)
 
         return state_matrix
 
@@ -269,8 +284,11 @@ class NeighbourESN(EchoStateNetwork):
     def get_feedback_weight(self, i, x2, y2):
         return self.feedback_weights[self.point_to_index(x2, y2), i]
 
-    def get_output_weight(self, i, x2, y2):
+    def get_internal_to_output_weight(self, i, x2, y2):
         return self.output_weights[i, self.point_to_index(x2, y2)]
+
+    def get_input_to_output_weight(self, i, j):
+        return self.output_weights[i, self.n_internal_units + j]
 
     def point_to_index(self, x, y):
         return x % self.width + y * self.width
@@ -310,40 +328,77 @@ class NeighbourESN(EchoStateNetwork):
         return self._normalise_internal_weights(weights)
 
 
+class OnlineNeighbourESN(NeighbourESN):
+
+    def train(self, input, output, n_forget_points=0, callback=None, callback_every=None, reset_points=None):
+        assert len(input) == len(output)
+        assert input.shape[1] == self.n_input_units
+        assert output.shape[1] == self.n_output_units
+
+        if callback:
+            callback_state = np.zeros((callback_every, self.n_input_units + self.n_internal_units + self.n_output_units))
+
+        if reset_points is not None:
+            reset_points = set(reset_points)
+
+        for i, input_point in enumerate(input):
+
+            if reset_points is not None and i in reset_points:
+                self.reset_state()
+
+            scaled_input = (self.input_scaling * input_point + self.input_shift).reshape(
+                len(input_point), 1)
+
+            self.total_state[self.n_internal_units :
+                             self.n_internal_units + self.n_input_units] = scaled_input
+            if self.time_constants is None:
+                self._update_internal_state()
+            else:
+                self._update_internal_state_leaky()
+
+            scaled_output = self.teacher_scaling * output[i,:] + self.teacher_shift
+            scaled_output = scaled_output.reshape((len(scaled_output), 1))
+
+            self.total_state = np.vstack((self.internal_state, scaled_input, scaled_output))
+
+            if i >= n_forget_points:
+                # gradient descent
+
+                estimated_output = self.output_activation_function(
+                    np.dot(self.output_weights,
+                           np.vstack((self.internal_state, scaled_input))))
+                error = scaled_output - estimated_output
+                    
+                learning_rate = 0.012
+                for o, w in enumerate(self.output_weights[0, :]):
+                    x = self.total_state[o, 0]
+                    dw = x * learning_rate * error
+                    self.output_weights[0, o] += dw
+
+            if callback:
+                callback_state[i % callback_every,:] = np.vstack((scaled_input, self.internal_state, scaled_output)).T
+                if (i + 1) % callback_every == 0:
+                    #print i, len(input)
+                    callback(callback_state)
+
+
 def nrmse(estimated, correct):
+    correct_variance = np.var(correct)
+    if correct_variance == 0:
+        correct_variance = 0.01 # hack
+
+    return np.sqrt(mean_error(estimated, correct) / correct_variance)
+
+def mean_error(estimated, correct):
     n_forget_points = len(correct) - len(estimated)
     correct = correct[n_forget_points:, :]
-    correct_variance = np.var(correct)
-    mean_error = sum(np.power(estimated - correct, 2)) / len(estimated)
-    return np.sqrt(mean_error / correct_variance)
+    return sum(np.power(estimated - correct, 2)) / len(estimated)
 
-def optimise(esn, input, output, forget_points, iterations=10, test=nrmse):
-    best_output = None
-    best_error = float('+inf')
-
-    for i in xrange(iterations):
-        if i > 0:
-            esn.reset()
-
-        esn.train(input, output, forget_points)
-        estimated_output = esn.test(input)
-        error = np.sum(nrmse(estimated_output, output))
-        if error < best_error:
-            print i, error
-            best_output = estimated_output
-            best_error = error
-            best_esn = copy.deepcopy(esn)
-
-    return best_esn, best_output, best_error
-    
-
-class MyFloat(float):
-    output = None
-    estimated_output = None
+import traceback
 
 class GeneticOptimiser(object):
 
-    def __init__(self, esn, input, output, forget_points, test=nrmse):
+    def __init__(self, esn, input, output, forget_points=0, test=nrmse):
         self.esn = esn
         self.input = input
         self.output = output
@@ -371,42 +426,6 @@ class GeneticOptimiser(object):
         error = np.sum(self.test(estimated_output, self.output))
 
         print error
-#        error.output = self.output
-#        error.estimated_output = estimated_output
-
         return error
 
-    
-def mutate(params, mutate_ratio=0.2):
-    ndx = np.random.choice(len(params), int(len(params) * mutate_ratio))
-    values = params[ndx]
-    np.random.shuffle(values)
-    values += np.random.rand(len(values)) * .1
-    params[ndx] = values
-    return params.copy()
 
-def mate(params1, params2):
-    split = np.random.randint(len(params1))
-    return np.concatenate((params1[:split], params2[split:])), np.concatenate((params1[split:], params2[:split]))
-
-def fmin(func, params, pool_size=20, generation=0):
-    print 'generation: %d' % generation
-    pool = [None] * pool_size
-    errors = [0] * pool_size
-    for i in range(pool_size):
-        pool[i] = mutate(params)
-        errors[i] = func(pool[i])
-
-    best_ndx = np.argsort(errors)[:4]
-    np.random.shuffle(best_ndx)
-    for i in range(0, len(best_ndx), 2):
-        i1, i2 = best_ndx[i], best_ndx[i + 1]
-        print errors[i1], errors[i2]
-        offspring = mate(pool[i1], pool[i2])
-
-    pool = None
-    errors = None
-    for child in offspring:
-        fmin(func, child, pool_size, generation + 1)
-
-    import ipdb; ipdb.set_trace()
