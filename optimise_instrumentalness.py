@@ -7,9 +7,9 @@ import test_data
 
 if __name__ == '__main__':
 
-    input, output, network = test_data.instrumentalness()
+    train_input, train_output, train_splits, test_input, test_output, test_splits, network = test_data.instrumentalness()
 
-    optimiser = esn.GeneticOptimiser(network, input, output, 0)
+    optimiser = esn.GeneticOptimiser(network, train_input, train_output, 0)
     params = np.array(optimiser.initial_params())
     res = cma.fmin(optimiser.evaluate, params, 0.1, maxiter=1)
 
