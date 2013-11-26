@@ -233,7 +233,7 @@ def test_data3(waveform, sequence_length=10000, min_pitch=30, max_pitch=60, sr=S
     return pitches, audio, esn
 
 
-def instrumentalness(n_train=100, n_test=100, deterministic=False):
+def instrumentalness(n_train=100, n_test=100, deterministic=False, side=10):
     segment_dir = 'segments'
     vocal_dir = 'vocals'
 
@@ -301,7 +301,7 @@ def instrumentalness(n_train=100, n_test=100, deterministic=False):
     test_input, test_output, test_splits = get_input_output_splits(segment_filenames[n_train:], vocal_filenames[n_train:])
 
     n_input_units = 12
-    width = height = 8
+    width = height = side
 
     esn = NeighbourESN(
         n_input_units=n_input_units,
