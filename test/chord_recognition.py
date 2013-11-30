@@ -71,32 +71,32 @@ def main():
 
     network = esn.EchoStateNetwork(
         n_input_units=n_input_units,
-#        width=30,
-#        height=10,
-        width=30,
-        height=30,
+        width=20,
+        height=20,
         connectivity=0.02,
         n_output_units=n_output_units,
+#        input_scaling=[1] * n_input_units,
+#        input_shift=[0] * n_input_units,        
         input_scaling=[2] * n_input_units,
         input_shift=[-.5] * n_input_units,
         teacher_scaling=[.9] * n_output_units,
         teacher_shift=[0] * n_output_units,
         noise_level=0.001,
-        spectral_radius=1.2,
+        spectral_radius=.1,
         feedback_scaling=[0] * n_output_units,
         leakage=0,
-        time_constants=None,
+        time_constants=[.1] * 100,
         output_activation_function='tanh'
     )
 
     t0 = time.time()
 
-    n_train = 100
+    n_train = 50
     meta_data = read_meta_data()
     input, output, split_points = read_data(meta_data.keys()[:n_train])
 
     if hasattr(esn, 'Visualiser'):
-        visualiser = esn.Visualiser(network, 1000, input_yscale=.5, internal_yscale=.5, output_yscale=.5)
+        visualiser = esn.Visualiser(network, 1000, input_yscale=.5, internal_yscale=.05, output_yscale=.5)
 
     n_forget_points = 0
 
@@ -176,8 +176,15 @@ def parse_chroma_file(filename):
         for segment in segments:
             start = segment['start']
             chroma = segment['pitches']
+#            chroma = get_zweiklangs(chroma)
             timed_chromas.append((float(start), chroma))
     return timed_chromas
+
+def get_zweiklangs(chroma):
+    peaks = np.argsort(chroma)[-2:]
+    chroma = np.zeros(len(chroma))
+    chroma[peaks] = 1
+    return chroma
 
 def parse_chords_file(filename):
     timed_chords = []

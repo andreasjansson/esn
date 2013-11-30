@@ -54,6 +54,8 @@ class EchoStateNetwork(object):
 #        if time_constants is None:
 #            time_constants = [1] * n_internal_units
         self.time_constants = time_constants
+        if time_constants is not None:
+            self.time_constants = np.array(time_constants)
         self.reservoir_activation_function = function_from_name(reservoir_activation_function) # maybe cuda
         self.callback = None
         self.callback_every = None
@@ -137,7 +139,10 @@ class EchoStateNetwork(object):
 
             self.total_state[self.n_internal_units :
                              self.n_internal_units + self.n_input_units] = scaled_input
-            self._update_internal_state()
+            if self.time_constants is not None:
+                self._update_internal_state_leaky()
+            else:
+                self._update_internal_state()
 
             self.total_state[:self.n_internal_units, :] = self.internal_state
             self.total_state[self.n_internal_units:self.n_internal_units + self.n_input_units, :] = scaled_input
@@ -171,6 +176,18 @@ class EchoStateNetwork(object):
     def _update_internal_state(self):
         self.internal_state = self.reservoir_activation_function(gpu.dot(self.fixed_weights, self.total_state))
         self.internal_state += self.noise_level * (gpu.rand(self.n_internal_units, 1) - .5).astype('float32')
+
+
+    def _update_internal_state_leaky(self):
+        previous_internal_state = self.total_state[0:self.n_internal_units, :]
+
+        self.time_constants = 1
+        self.leakage = .1
+
+        self.internal_state = ((1 - self.leakage * self.time_constants) * previous_internal_state +
+                               self.time_constants * self.reservoir_activation_function(
+                                   np.dot(self.fixed_weights, self.total_state)))
+        self.internal_state += self.noise_level * (np.random.rand(self.n_internal_units, 1) - .5).astype('float32')
 
     def _compute_teacher_matrix(self, output, n_forget_points):
         teacher = self.teacher_scaling * output[n_forget_points:, :] + self.teacher_shift
