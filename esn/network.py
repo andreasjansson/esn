@@ -1,23 +1,23 @@
-import numpy as np
+#import numpy as np
 import scipy.sparse
 import matplotlib.pyplot as plt
 import copy
 import itertools
 import cma
 #from profilestats import profile
-
-try:
-    import pycuda.driver as drv
-    import pycuda.gpuarray as gpuarray
-    import pycuda.cumath as cumath
-    import pycuda.autoinit
-    from scikits.cuda import linalg as cuda_linalg
-    cuda_linalg.init()
-    has_cuda = True
-except ImportError:
-    has_cuda = False
+import numpy as np
+import numpy as gpu
+#import gnumpy as gpu
+import functools
 
 #has_cuda = False
+
+gpu.vstack = gpu.concatenate
+gpu.hstack = functools.partial(gpu.concatenate, axis=1)
+gpu.arctanh = lambda x: .5 * gpu.log((1 + x) / (1 - x))
+
+np.rand = np.random.rand
+np.garray = np.array
 
 class EchoStateNetwork(object):
 
@@ -67,20 +67,20 @@ class EchoStateNetwork(object):
         self.input_weights = self._generate_input_weights()
         self.internal_weights = self._generate_internal_weights()
         self.feedback_weights = self._generate_feedback_weights()
-        self.output_weights = maybe_cuda(np.zeros((
-            self.n_output_units, self.n_internal_units + self.n_input_units)))
+        self.output_weights = gpu.zeros((
+            self.n_output_units, self.n_internal_units + self.n_input_units))
 
-        scaled_feedback_weights = np.dot(self.feedback_weights, np.diag(self.feedback_scaling))
+        scaled_feedback_weights = gpu.dot(self.feedback_weights, gpu.diagflat(self.feedback_scaling))
         scaled_feedback_weights = scaled_feedback_weights.reshape((len(self.feedback_weights), self.n_output_units))
-        self.fixed_weights = maybe_cuda(np.hstack((self.internal_weights, self.input_weights, scaled_feedback_weights)))
+        self.fixed_weights = gpu.hstack((self.internal_weights, self.input_weights, scaled_feedback_weights))
 
         self.reset_state()
 
     def reset_state(self):
-        self.total_state = np.zeros((self.n_input_units + self.n_internal_units +
-                                     self.n_output_units, 1))
-        self.internal_state = maybe_cuda(np.zeros((self.n_internal_units, 1)))
-        self.internal_state = maybe_cuda(np.zeros((self.n_internal_units, 1)))
+        self.total_state = gpu.zeros((self.n_input_units + self.n_internal_units +
+                                      self.n_output_units, 1))
+        self.internal_state = gpu.zeros((self.n_internal_units, 1))
+        self.internal_state = gpu.zeros((self.n_internal_units, 1))
 
     def serialize(self):
         return {
@@ -104,56 +104,30 @@ class EchoStateNetwork(object):
 
         state_matrix = self._compute_state_matrix(input, output, n_forget_points, reset_points=reset_points)
         teacher_matrix = self._compute_teacher_matrix(output, n_forget_points)
-        self.output_weights = linear_regression_maybe_cuda(state_matrix, teacher_matrix)
+        self.output_weights = linear_regression(state_matrix, teacher_matrix)
 
         return state_matrix
 
     def test(self, input, n_forget_points=0, reset_points=None, actual_output=None):
         state_matrix = self._compute_state_matrix(input, n_forget_points=n_forget_points,
                                                   reset_points=reset_points, actual_output=actual_output)
-        output = maybe_cuda_dot(maybe_cuda(state_matrix), self.output_weights.T)
-        output = no_cuda(self.output_activation_function(output))
+        output = gpu.dot(state_matrix, self.output_weights.T)
+        output = self.output_activation_function(output)
         output -= self.teacher_shift
         output /= self.teacher_scaling
 
         return output
 
-    def train_multiple(self, inputs, outputs, n_forget_points=0):
-        assert len(inputs) == len(outputs)
-        state_matrix = None
-        teacher_matrix = None
-        for i, (input, output) in enumerate(itertools.izip(inputs, outputs)):
-            print i
-            assert input.shape[1] == self.n_input_units
-            assert output.shape[1] == self.n_output_units
-
-            local_state_matrix = self._compute_state_matrix(input, output, n_forget_points)
-            local_teacher_matrix = self._compute_teacher_matrix(output, n_forget_points)
-
-            if state_matrix is None:
-                state_matrix = local_state_matrix
-                teacher_matrix = local_teacher_matrix
-            else:
-                state_matrix = np.vstack((state_matrix, local_state_matrix))
-                teacher_matrix = np.vstack((teacher_matrix, local_teacher_matrix))
-
-            self.reset_state()
-
-        self.output_weights = self._linear_regression_wiener_hopf(state_matrix, teacher_matrix)
-        return state_matrix, teacher_matrix
-
     def _compute_state_matrix(self, input, output=None, n_forget_points=0,
                               reset_points=None, actual_output=None):
-        state_matrix = np.zeros((len(input) - n_forget_points,
-                                 self.n_input_units + self.n_internal_units))
+        state_matrix = gpu.zeros((len(input) - n_forget_points,
+                                  self.n_input_units + self.n_internal_units))
 
         if self.callback:
-            callback_state = np.zeros((self.callback_every, self.n_input_units + self.n_internal_units + self.n_output_units))
+            callback_state = gpu.zeros((self.callback_every, self.n_input_units + self.n_internal_units + self.n_output_units))
 
         if reset_points is not None:
             reset_points = set(reset_points)
-
-        
 
         for i, input_point in enumerate(input):
 
@@ -165,18 +139,13 @@ class EchoStateNetwork(object):
 
             self.total_state[self.n_internal_units :
                              self.n_internal_units + self.n_input_units] = scaled_input
-            if self.time_constants is None:
-                self._update_internal_state()
-            else:
-                self._update_internal_state_leaky()
+            self._update_internal_state()
 
-            self.total_state[:self.n_internal_units, :] = no_cuda(self.internal_state)
+            self.total_state[:self.n_internal_units, :] = self.internal_state
             self.total_state[self.n_internal_units:self.n_internal_units + self.n_input_units, :] = scaled_input
 
             if output is None:
-                scaled_output = self.output_activation_function(
-                    maybe_cuda_dot(self.output_weights, maybe_cuda(self.total_state[:-self.n_output_units, :])))
-                scaled_output = no_cuda(scaled_output)
+                scaled_output = self.output_activation_function(self.output_weights.dot(self.total_state[:-self.n_output_units, :]))
             else:
                 scaled_output = self.teacher_scaling * output[i,:] + self.teacher_shift
                 scaled_output = scaled_output.reshape((len(scaled_output), 1))
@@ -184,14 +153,14 @@ class EchoStateNetwork(object):
             self.total_state[-self.n_output_units:, :] = scaled_output
 
             if i >= n_forget_points:
-                state_matrix[i - n_forget_points, :self.n_internal_units] = no_cuda(self.internal_state).T
+                state_matrix[i - n_forget_points, :self.n_internal_units] = self.internal_state.T
                 state_matrix[i - n_forget_points, self.n_internal_units:] = scaled_input.T
 
             if i % 100 == 0:
                 print i, len(input)
 
             if self.callback:
-                callback_state[i % self.callback_every,:] = np.vstack((scaled_input, self.internal_state, scaled_output)).T
+                callback_state[i % self.callback_every,:] = gpu.vstack((scaled_input, self.internal_state, scaled_output)).T
                 if (i + 1) % self.callback_every == 0:
                     print i, len(input)
                     if actual_output is not None:
@@ -201,44 +170,35 @@ class EchoStateNetwork(object):
 
         return state_matrix
 
-    def _update_internal_state_leaky(self):
-        previous_internal_state = self.total_state[0:self.n_internal_units, :]
-        scaled_feedback_weights = np.dot(self.feedback_weights, np.diag(self.feedback_scaling))
-        scaled_feedback_weights = scaled_feedback_weights.reshape((len(self.feedback_weights), self.n_output_units))
-
-        self.internal_state = ((1 - self.leakage * self.time_constants) * previous_internal_state +
-                               self.time_constants * self.reservoir_activation_function(
-                                   np.dot(np.hstack((self.internal_weights, self.input_weights, scaled_feedback_weights)),
-                                          self.total_state)))
-
-        self.internal_state += self.noise_level * (np.random.rand(self.n_internal_units, 1) - .5)
-
     def _update_internal_state(self):
-        self.internal_state = self.reservoir_activation_function(maybe_cuda_dot(self.fixed_weights, maybe_cuda(self.total_state)))
-        self.internal_state += self.noise_level * (maybe_cuda(np.random.rand(self.n_internal_units, 1)) - .5)
+        self.internal_state = self.reservoir_activation_function(gpu.dot(self.fixed_weights, self.total_state))
+        self.internal_state += self.noise_level * (gpu.rand(self.n_internal_units, 1) - .5)
 
     def _compute_teacher_matrix(self, output, n_forget_points):
-        teacher = maybe_cuda(self.teacher_scaling * output[n_forget_points:, :] + self.teacher_shift)
+        teacher = self.teacher_scaling * output[n_forget_points:, :] + self.teacher_shift
         return self.inverse_output_activation_function(teacher)
 
     def _generate_input_weights(self):
-        return 2 * np.random.random((self.n_internal_units, self.n_input_units)) - 1
+        return 2 * gpu.rand(self.n_internal_units, self.n_input_units) - 1
 
     def _generate_internal_weights(self):
         internal_weights = scipy.sparse.rand(
             self.n_internal_units, self.n_internal_units, self.connectivity)
-        internal_weights = internal_weights.todense()
+        internal_weights = gpu.garray(internal_weights.todense())
         return self._normalise_internal_weights(internal_weights)
 
     def _normalise_internal_weights(self, internal_weights):
-        internal_weights[np.where(internal_weights != 0)] -= .5
-        radius = np.max(np.abs(np.linalg.eigvals(internal_weights)))
+        import ipdb; ipdb.set_trace()
+        internal_weights[gpu.where(internal_weights != 0)] -= .5
+        #eigvals = np.linalg.eigvals(internal_weights.as_numpy_array())
+        eigvals = np.linalg.eigvals(internal_weights)
+        radius = gpu.max(gpu.abs(eigvals))
         internal_weights /= radius
         internal_weights *= self.spectral_radius
         return internal_weights
 
     def _generate_feedback_weights(self):
-        return 2 * np.random.random((self.n_internal_units, self.n_output_units)) - 1
+        return 2 * gpu.rand(self.n_internal_units, self.n_output_units) - 1
 
     def get_input_weight(self, i, x2, y2):
         return self.input_weights[self.point_to_index(x2, y2), i]
@@ -331,71 +291,18 @@ class NeighbourESN(EchoStateNetwork):
         return self._normalise_internal_weights(weights)
 
 
-class OnlineNeighbourESN(NeighbourESN):
-
-    def train(self, input, output, n_forget_points=0, callback=None, callback_every=None, reset_points=None):
-        assert len(input) == len(output)
-        assert input.shape[1] == self.n_input_units
-        assert output.shape[1] == self.n_output_units
-
-        if callback:
-            callback_state = np.zeros((callback_every, self.n_input_units + self.n_internal_units + self.n_output_units))
-
-        if reset_points is not None:
-            reset_points = set(reset_points)
-
-        for i, input_point in enumerate(input):
-
-            if reset_points is not None and i in reset_points:
-                self.reset_state()
-
-            scaled_input = (self.input_scaling * input_point + self.input_shift).reshape(
-                len(input_point), 1)
-
-            self.total_state[self.n_internal_units :
-                             self.n_internal_units + self.n_input_units] = scaled_input
-            if self.time_constants is None:
-                self._update_internal_state()
-            else:
-                self._update_internal_state_leaky()
-
-            scaled_output = self.teacher_scaling * output[i,:] + self.teacher_shift
-            scaled_output = scaled_output.reshape((len(scaled_output), 1))
-
-            self.total_state = np.vstack((self.internal_state, scaled_input, scaled_output))
-
-            if i >= n_forget_points:
-                # gradient descent
-
-                estimated_output = self.output_activation_function(
-                    np.dot(self.output_weights,
-                           np.vstack((self.internal_state, scaled_input))))
-                error = scaled_output - estimated_output
-                    
-                learning_rate = 0.012
-                for o, w in enumerate(self.output_weights[0, :]):
-                    x = self.total_state[o, 0]
-                    dw = x * learning_rate * error
-                    self.output_weights[0, o] += dw
-
-            if callback:
-                callback_state[i % callback_every,:] = np.vstack((scaled_input, self.internal_state, scaled_output)).T
-                if (i + 1) % callback_every == 0:
-                    #print i, len(input)
-                    callback(callback_state)
-
-
 def nrmse(estimated, correct):
+    #correct_variance = np.var(correct.as_numpy_array())
     correct_variance = np.var(correct)
     if correct_variance == 0:
         correct_variance = 0.01 # hack
 
-    return np.sqrt(mean_error(estimated, correct) / correct_variance)
+    return gpu.sqrt(mean_error(estimated, correct) / correct_variance)
 
 def mean_error(estimated, correct):
     n_forget_points = len(correct) - len(estimated)
     correct = correct[n_forget_points:, :]
-    return sum(np.power(estimated - correct, 2)) / len(estimated)
+    return sum((estimated - correct) ** 2) / len(estimated)
 
 class Optimiser(object):
 
@@ -429,27 +336,6 @@ class Optimiser(object):
         print error
         return error
 
-def maybe_cuda(x):
-    if has_cuda:
-        return gpuarray.to_gpu(x).astype('float32')
-    else:
-        return x
-
-def no_cuda(x):
-    if has_cuda:
-        return x.get()
-    else:
-        return x
-
-def maybe_cuda_dot(x, y):
-    if has_cuda:
-        return cuda_linalg.dot(x, y)
-    else:
-        return np.dot(x, y)
-
-def cu_arctanh(x):
-    return .5 * cumath.log((1 + x) / (1 - x))
-
 def function_from_name(name, return_inverse=False):
     func = None
     inverse = None
@@ -457,12 +343,8 @@ def function_from_name(name, return_inverse=False):
         func = lambda x: x
         inverse = lambda x: x
     elif name == 'tanh':
-        if has_cuda:
-            func = cumath.tanh
-            inverse = cu_arctanh
-        else:
-            func = np.tanh
-            inverse = np.arctanh
+        func = gpu.tanh
+        inverse = gpu.arctanh
     else:
         raise Exception('Unknown function: %s' % name)
 
@@ -471,11 +353,12 @@ def function_from_name(name, return_inverse=False):
     else:
         return func
 
-def linear_regression_maybe_cuda(state_matrix, teacher_matrix):
-    if has_cuda:
-        return cuda_linalg.transpose(maybe_cuda_dot(cuda_linalg.pinv(maybe_cuda(state_matrix)), teacher_matrix))
-    else:
-        run_length = np.shape(state_matrix)[0]
-        cov_mat = state_matrix.T.dot(state_matrix / run_length)
-        p_vec = state_matrix.T.dot(teacher_matrix / run_length)
-        return (np.linalg.inv(cov_mat).dot(p_vec)).T
+def linear_regression(state_matrix, teacher_matrix):
+    # use actual gpu linalg packages here instead
+    # return cuda_linalg.transpose(maybe_cuda_dot(cuda_linalg.pinv(maybe_cuda(state_matrix)), teacher_matrix))
+    run_length = state_matrix.shape[0]
+    cov_mat = state_matrix.T.dot(state_matrix / run_length)
+    p_vec = state_matrix.T.dot(teacher_matrix / run_length)
+    #inv = gpu.garray(np.linalg.inv(cov_mat.as_numpy_array()))
+    inv = gpu.garray(np.linalg.inv(cov_mat))
+    return (inv.dot(p_vec)).T
