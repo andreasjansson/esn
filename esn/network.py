@@ -6,11 +6,9 @@ import itertools
 import cma
 #from profilestats import profile
 import numpy as np
-#import numpy as gpu
-import gnumpy as gpu
+import numpy as gpu
+#import gnumpy as gpu
 import functools
-
-#has_cuda = False
 
 gpu.vstack = gpu.concatenate
 gpu.hstack = functools.partial(gpu.concatenate, axis=1)
@@ -188,15 +186,15 @@ class EchoStateNetwork(object):
         return self._normalise_internal_weights(internal_weights)
 
     def _normalise_internal_weights(self, internal_weights):
-        internal_weights[gpu.where(internal_weights != 0)] -= .5
-        if gpu == np:
-            eigvals = np.linalg.eigvals(internal_weights)
-        else:
-            eigvals = np.linalg.eigvals(internal_weights.as_numpy_array())
-        radius = gpu.max(gpu.abs(eigvals))
+        if gpu != np:
+            internal_weights = internal_weights.as_numpy_array()
+
+        internal_weights[np.where(internal_weights != 0)] -= .5
+        eigvals = np.linalg.eigvals(internal_weights)
+        radius = np.max(np.abs(eigvals))
         internal_weights /= radius
         internal_weights *= self.spectral_radius
-        return internal_weights
+        return gpu.garray(internal_weights)
 
     def _generate_feedback_weights(self):
         return 2 * gpu.rand(self.n_internal_units, self.n_output_units) - 1

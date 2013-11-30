@@ -72,8 +72,8 @@ def main():
         n_input_units=n_input_units,
 #        width=30,
 #        height=10,
-        width=10,
-        height=10,
+        width=60,
+        height=60,
         connectivity=0.05,
         n_output_units=n_output_units,
         input_scaling=[2] * n_input_units,
@@ -88,7 +88,7 @@ def main():
         output_activation_function='tanh'
     )
 
-    n_train = 50
+    n_train = 10
     meta_data = read_meta_data()
     input, output, split_points = read_data(meta_data.keys()[:n_train])
 
@@ -97,7 +97,12 @@ def main():
 
     n_forget_points = 0
 
+    import statprof
+    statprof.start()
     network.train(input, output, reset_points=split_points, n_forget_points=n_forget_points)
+    statprof.stop()
+    statprof.display()
+    import ipdb; ipdb.set_trace()
 
     network.noise_level = 0
 
