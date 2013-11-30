@@ -1,21 +1,11 @@
-#import numpy as np
+import numpy as np
 import scipy.sparse
 import matplotlib.pyplot as plt
 import copy
 import itertools
 import cma
 #from profilestats import profile
-import numpy as np
-import numpy as gpu
-#import gnumpy as gpu
 import functools
-
-gpu.vstack = gpu.concatenate
-gpu.hstack = functools.partial(gpu.concatenate, axis=1)
-gpu.arctanh = lambda x: .5 * gpu.log((1 + x) / (1 - x))
-
-np.rand = np.random.rand
-np.garray = np.array
 
 class EchoStateNetwork(object):
 
@@ -33,7 +23,6 @@ class EchoStateNetwork(object):
                  spectral_radius,
                  feedback_scaling,
                  leakage=0,
-                 time_constants=None,
                  reservoir_activation_function='tanh',
                  output_activation_function='identity'):
 
@@ -51,11 +40,6 @@ class EchoStateNetwork(object):
         self.spectral_radius = spectral_radius
         self.feedback_scaling = feedback_scaling
         self.leakage = leakage
-#        if time_constants is None:
-#            time_constants = [1] * n_internal_units
-        self.time_constants = time_constants
-        if time_constants is not None:
-            self.time_constants = np.array(time_constants)
         self.reservoir_activation_function = function_from_name(reservoir_activation_function) # maybe cuda
         self.callback = None
         self.callback_every = None
@@ -67,20 +51,20 @@ class EchoStateNetwork(object):
         self.input_weights = self._generate_input_weights()
         self.internal_weights = self._generate_internal_weights()
         self.feedback_weights = self._generate_feedback_weights()
-        self.output_weights = gpu.zeros((
+        self.output_weights = np.zeros((
             self.n_output_units, self.n_internal_units + self.n_input_units), dtype='float32')
 
-        scaled_feedback_weights = gpu.dot(self.feedback_weights, gpu.diagflat(self.feedback_scaling))
+        scaled_feedback_weights = np.dot(self.feedback_weights, np.diagflat(self.feedback_scaling))
         scaled_feedback_weights = scaled_feedback_weights.reshape((len(self.feedback_weights), self.n_output_units))
-        self.fixed_weights = gpu.hstack((self.internal_weights, self.input_weights, scaled_feedback_weights))
+        self.fixed_weights = np.hstack((self.internal_weights, self.input_weights, scaled_feedback_weights))
 
         self.reset_state()
 
     def reset_state(self):
-        self.total_state = gpu.zeros((self.n_input_units + self.n_internal_units +
+        self.total_state = np.zeros((self.n_input_units + self.n_internal_units +
                                       self.n_output_units, 1), dtype='float32')
-        self.internal_state = gpu.zeros((self.n_internal_units, 1), dtype='float32')
-        self.internal_state = gpu.zeros((self.n_internal_units, 1), dtype='float32')
+        self.internal_state = np.zeros((self.n_internal_units, 1), dtype='float32')
+        self.internal_state = np.zeros((self.n_internal_units, 1), dtype='float32')
 
     def serialize(self):
         return {
@@ -111,7 +95,7 @@ class EchoStateNetwork(object):
     def test(self, input, n_forget_points=0, reset_points=None, actual_output=None):
         state_matrix = self._compute_state_matrix(input, n_forget_points=n_forget_points,
                                                   reset_points=reset_points, actual_output=actual_output)
-        output = gpu.dot(state_matrix, self.output_weights.T)
+        output = np.dot(state_matrix, self.output_weights.T)
         output = self.output_activation_function(output)
         output -= self.teacher_shift
         output /= self.teacher_scaling
@@ -120,11 +104,11 @@ class EchoStateNetwork(object):
 
     def _compute_state_matrix(self, input, output=None, n_forget_points=0,
                               reset_points=None, actual_output=None):
-        state_matrix = gpu.zeros((len(input) - n_forget_points,
+        state_matrix = np.zeros((len(input) - n_forget_points,
                                   self.n_input_units + self.n_internal_units), dtype='float32')
 
         if self.callback:
-            callback_state = gpu.zeros((self.callback_every, self.n_input_units + self.n_internal_units + self.n_output_units), dtype='float32')
+            callback_state = np.zeros((self.callback_every, self.n_input_units + self.n_internal_units + self.n_output_units), dtype='float32')
 
         if reset_points is not None:
             reset_points = set(reset_points)
@@ -139,7 +123,7 @@ class EchoStateNetwork(object):
 
             self.total_state[self.n_internal_units :
                              self.n_internal_units + self.n_input_units] = scaled_input
-            if self.time_constants is not None:
+            if self.leakage:
                 self._update_internal_state_leaky()
             else:
                 self._update_internal_state()
@@ -163,7 +147,7 @@ class EchoStateNetwork(object):
                 print i, len(input)
 
             if self.callback:
-                callback_state[i % self.callback_every,:] = gpu.vstack((scaled_input, self.internal_state, scaled_output)).T
+                callback_state[i % self.callback_every,:] = np.vstack((scaled_input, self.internal_state, scaled_output)).T
                 if (i + 1) % self.callback_every == 0:
                     print i, len(input)
                     if actual_output is not None:
@@ -174,18 +158,14 @@ class EchoStateNetwork(object):
         return state_matrix
 
     def _update_internal_state(self):
-        self.internal_state = self.reservoir_activation_function(gpu.dot(self.fixed_weights, self.total_state))
-        self.internal_state += self.noise_level * (gpu.rand(self.n_internal_units, 1) - .5).astype('float32')
+        self.internal_state = self.reservoir_activation_function(np.dot(self.fixed_weights, self.total_state))
+        self.internal_state += self.noise_level * (np.random.rand(self.n_internal_units, 1) - .5).astype('float32')
 
 
     def _update_internal_state_leaky(self):
         previous_internal_state = self.total_state[0:self.n_internal_units, :]
-
-        self.time_constants = 1
-        self.leakage = .1
-
-        self.internal_state = ((1 - self.leakage * self.time_constants) * previous_internal_state +
-                               self.time_constants * self.reservoir_activation_function(
+        self.internal_state = ((1 - self.leakage) * previous_internal_state +
+                               self.leakage * self.reservoir_activation_function(
                                    np.dot(self.fixed_weights, self.total_state)))
         self.internal_state += self.noise_level * (np.random.rand(self.n_internal_units, 1) - .5).astype('float32')
 
@@ -194,27 +174,24 @@ class EchoStateNetwork(object):
         return self.inverse_output_activation_function(teacher)
 
     def _generate_input_weights(self):
-        return 2 * gpu.rand(self.n_internal_units, self.n_input_units).astype('float32') - 1
+        return 2 * np.random.rand(self.n_internal_units, self.n_input_units).astype('float32') - 1
 
     def _generate_internal_weights(self):
         internal_weights = scipy.sparse.rand(
             self.n_internal_units, self.n_internal_units, self.connectivity)
-        internal_weights = gpu.garray(internal_weights.todense(), dtype='float32')
+        internal_weights = np.array(internal_weights.todense(), dtype='float32')
         return self._normalise_internal_weights(internal_weights)
 
     def _normalise_internal_weights(self, internal_weights):
-        if gpu != np:
-            internal_weights = internal_weights.as_numpy_array()
-
         internal_weights[np.where(internal_weights != 0)] -= .5
         eigvals = np.linalg.eigvals(internal_weights)
         radius = np.max(np.abs(eigvals))
         internal_weights /= radius
         internal_weights *= self.spectral_radius
-        return gpu.garray(internal_weights, dtype='float32')
+        return np.array(internal_weights, dtype='float32')
 
     def _generate_feedback_weights(self):
-        return 2 * gpu.rand(self.n_internal_units, self.n_output_units).astype('float32') - 1
+        return 2 * np.random.rand(self.n_internal_units, self.n_output_units).astype('float32') - 1
 
     def get_input_weight(self, i, x2, y2):
         return self.input_weights[self.point_to_index(x2, y2), i]
@@ -308,14 +285,11 @@ class NeighbourESN(EchoStateNetwork):
 
 
 def nrmse(estimated, correct):
-    if gpu == np:
-        correct_variance = np.var(correct)
-    else:
-        correct_variance = np.var(correct.as_numpy_array())
+    correct_variance = np.var(correct)
     if correct_variance == 0:
         correct_variance = 0.01 # hack
 
-    return gpu.sqrt(mean_error(estimated, correct) / correct_variance)
+    return np.sqrt(mean_error(estimated, correct) / correct_variance)
 
 def mean_error(estimated, correct):
     n_forget_points = len(correct) - len(estimated)
@@ -361,8 +335,8 @@ def function_from_name(name, return_inverse=False):
         func = lambda x: x
         inverse = lambda x: x
     elif name == 'tanh':
-        func = gpu.tanh
-        inverse = gpu.arctanh
+        func = np.tanh
+        inverse = np.arctanh
     else:
         raise Exception('Unknown function: %s' % name)
 
@@ -377,8 +351,5 @@ def linear_regression(state_matrix, teacher_matrix):
     run_length = state_matrix.shape[0]
     cov_mat = state_matrix.T.dot(state_matrix / run_length)
     p_vec = state_matrix.T.dot(teacher_matrix / run_length)
-    if gpu == np:
-        inv = gpu.garray(np.linalg.inv(cov_mat), dtype='float32')
-    else:
-        inv = gpu.garray(np.linalg.inv(cov_mat.as_numpy_array()))
+    inv = np.array(np.linalg.inv(cov_mat), dtype='float32')
     return (inv.dot(p_vec)).T

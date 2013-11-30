@@ -1,3 +1,26 @@
+# TODO: what happens if you take the estimated output and feed it into
+# a second layer network, trying to predict the same output?
+# what happens if that network also has timbre information as input?
+# or some lower-dimensional features, like energy or loudness?
+
+# TODO:
+# * bias input (with different scaling)
+# * sparse matrices
+# * larger reservoir
+# * remove smaller principal components
+# * experiment with band-pass filters (especially when training on audio, similar to auditory models)
+# * train on audio
+# * compare the performance of single to layered reservoirs
+# * sub-populations with different leaking rates
+# * record performance of parameters so as to not go in circles
+# * grid search for parameters (what is grid search ???)
+# * use ridge regression, logarithmic grid search (?) on test data to find \beta
+# * no noise necessary when using ridge regression
+# * make sure resetting between sequences actually works
+# * perhaps run sequences in parallel, if sparse matrices are faster
+# * try logistic regression instead of a second reservoir to improve the estimated output (obviously lacking history)
+# * use hmm on final outputs
+
 import esn
 import numpy as np
 import simplejson as json
@@ -84,8 +107,7 @@ def main():
         noise_level=0.001,
         spectral_radius=.1,
         feedback_scaling=[0] * n_output_units,
-        leakage=0,
-        time_constants=[.1] * 100,
+        leakage=.1,
         output_activation_function='tanh'
     )
 
