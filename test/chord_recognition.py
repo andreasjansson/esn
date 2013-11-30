@@ -117,6 +117,7 @@ def main():
     meta_data = read_meta_data()
     input, output, split_points = read_data(meta_data.keys()[:n_train])
 
+    del esn.Visualiser
     if hasattr(esn, 'Visualiser'):
         visualiser = esn.Visualiser(network, 1000, input_yscale=.5, internal_yscale=.05, output_yscale=.5)
 

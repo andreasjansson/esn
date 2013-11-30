@@ -56,7 +56,9 @@ class EchoStateNetwork(object):
 
         scaled_feedback_weights = np.dot(self.feedback_weights, np.diagflat(self.feedback_scaling))
         scaled_feedback_weights = scaled_feedback_weights.reshape((len(self.feedback_weights), self.n_output_units))
-        self.fixed_weights = np.hstack((self.internal_weights, self.input_weights, scaled_feedback_weights))
+        self.fixed_weights = scipy.sparse.csr_matrix(
+            np.hstack((self.internal_weights.todense(), self.input_weights, scaled_feedback_weights)),
+            dtype='float32')
 
         self.reset_state()
 
@@ -158,7 +160,7 @@ class EchoStateNetwork(object):
         return state_matrix
 
     def _update_internal_state(self):
-        self.internal_state = self.reservoir_activation_function(np.dot(self.fixed_weights, self.total_state))
+        self.internal_state = self.reservoir_activation_function(self.fixed_weights.dot(self.total_state))
         self.internal_state += self.noise_level * (np.random.rand(self.n_internal_units, 1) - .5).astype('float32')
 
 
@@ -166,7 +168,7 @@ class EchoStateNetwork(object):
         previous_internal_state = self.total_state[0:self.n_internal_units, :]
         self.internal_state = ((1 - self.leakage) * previous_internal_state +
                                self.leakage * self.reservoir_activation_function(
-                                   np.dot(self.fixed_weights, self.total_state)))
+                                   self.fixed_weights.dot(self.total_state)))
         self.internal_state += self.noise_level * (np.random.rand(self.n_internal_units, 1) - .5).astype('float32')
 
     def _compute_teacher_matrix(self, output, n_forget_points):
@@ -178,17 +180,16 @@ class EchoStateNetwork(object):
 
     def _generate_internal_weights(self):
         internal_weights = scipy.sparse.rand(
-            self.n_internal_units, self.n_internal_units, self.connectivity)
-        internal_weights = np.array(internal_weights.todense(), dtype='float32')
+            self.n_internal_units, self.n_internal_units, self.connectivity).tocsr()
         return self._normalise_internal_weights(internal_weights)
 
     def _normalise_internal_weights(self, internal_weights):
-        internal_weights[np.where(internal_weights != 0)] -= .5
-        eigvals = np.linalg.eigvals(internal_weights)
+        internal_weights.data -= .5
+        eigvals = np.linalg.eigvals(internal_weights.todense())
         radius = np.max(np.abs(eigvals))
         internal_weights /= radius
         internal_weights *= self.spectral_radius
-        return np.array(internal_weights, dtype='float32')
+        return internal_weights
 
     def _generate_feedback_weights(self):
         return 2 * np.random.rand(self.n_internal_units, self.n_output_units).astype('float32') - 1
