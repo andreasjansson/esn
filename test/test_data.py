@@ -233,9 +233,9 @@ def test_data3(waveform, sequence_length=10000, min_pitch=30, max_pitch=60, sr=S
     return pitches, audio, esn
 
 
-def instrumentalness(n_train=100, n_test=100, deterministic=False, side=10):
-    segment_dir = 'segments'
-    vocal_dir = 'vocals'
+def instrumentalness(n_train=100, n_test=200, deterministic=False, side=10):
+    segment_dir = '/home/andreas/r/instrumentalness/segments'
+    vocal_dir = '/home/andreas/r/instrumentalness/slicing/full_tracks'
 
     segment_filenames = sorted(glob.glob('%s/*.json' % segment_dir))
     vocal_filenames = sorted(glob.glob('%s/*.csv' % vocal_dir))

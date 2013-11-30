@@ -10,17 +10,22 @@ import numpy as np
 import cPickle
 
 from esn import NeighbourESN, nrmse, mean_error, OnlineNeighbourESN
-import test_data
+#import test_data
+
+app = None
 
 class Visualiser(wx.Frame):
 
-    def __init__(self, neighbour_esn, input_yscale=.2, internal_yscale=0.5, output_yscale=1):
-        super(Visualiser, self).__init__(None, -1, 'esn',
-        style=wx.DEFAULT_FRAME_STYLE ^ wx.RESIZE_BORDER)
-        #self.SetDoubleBuffered(True)
-        self.SetSizeHints(800, 800)
+    def __init__(self, network, refresh_rate=1, input_yscale=1, internal_yscale=1, output_yscale=1):
+        global app
+        if app is None:
+            app = wx.App()
 
-        self.esn = neighbour_esn
+        super(Visualiser, self).__init__(None, -1, 'esn', style=wx.DEFAULT_FRAME_STYLE ^ wx.RESIZE_BORDER)
+        #self.SetDoubleBuffered(True)
+        self.SetSizeHints(1200, 800)
+
+        self.network = network
         self.input_neurons = {}
         self.internal_neurons = {}
         self.output_neurons = {}
@@ -29,6 +34,8 @@ class Visualiser(wx.Frame):
         self.input_yscale = input_yscale
         self.internal_yscale = internal_yscale
         self.output_yscale = output_yscale
+
+        self.set_refresh_rate(refresh_rate)
 
         self.main_panel = wx.Panel(self)
         self.main_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -43,11 +50,19 @@ class Visualiser(wx.Frame):
         self.Update()
         self.Show()
 
+    def set_refresh_rate(self, refresh_rate):
+        if refresh_rate:
+            self.network.callback = self.refresh
+            self.network.callback_every = refresh_rate
+        else:
+            self.network.callback = None
+            self.network.callback_every = refresh_rate
+
     def add_input_neurons(self):
         panel = wx.Panel(self.main_panel)
         self.main_sizer.Add(panel, 1, wx.EXPAND)
 
-        cols = self.esn.n_input_units * 2 - 1
+        cols = self.network.n_input_units * 2 - 1
         sizer = wx.GridSizer(1, cols)
         panel.SetSizer(sizer)
 
@@ -60,7 +75,7 @@ class Visualiser(wx.Frame):
                 sizer.Add(wx.Panel(panel), 0, wx.EXPAND)
 
     def add_output_neurons(self):
-        cols = self.esn.n_output_units * 2 - 1
+        cols = self.network.n_output_units * 2 - 1
 
         panel = wx.Panel(self.main_panel)
         self.main_sizer.Add(panel, 1, wx.EXPAND)
@@ -80,9 +95,11 @@ class Visualiser(wx.Frame):
         panel = wx.Panel(self.main_panel)
         self.main_sizer.Add(panel, 8, wx.EXPAND)
 
-        cols = self.esn.width * 2 - 1
-        rows = self.esn.height * 2 - 1
-        sizer = wx.GridSizer(cols, rows)
+        cols = self.network.width * 2 - 1
+        rows = self.network.height * 2 - 1
+        sizer = wx.GridSizer(rows, cols)
+
+        panel.SetSizer(sizer)
 
         for row in range(rows):
             if row % 2 == 0:
@@ -97,7 +114,7 @@ class Visualiser(wx.Frame):
                     self.internal_neurons[(x, y)] = neuron
                     sizer.Add(neuron, flag=wx.EXPAND)
 
-                else:
+                elif isinstance(self.network, NeighbourESN):
                     if col % 2 == 1 and row % 2 == 1:
                         x1 = col // 2
                         x2 = x1 + 1
@@ -127,7 +144,7 @@ class Visualiser(wx.Frame):
 
                     real_directions = []
                     for ((x1, y1), (x2, y2)) in directions:
-                        weight = self.esn.get_internal_weight(x1, y1, x2, y2)
+                        weight = self.network.get_internal_weight(x1, y1, x2, y2)
                         if weight == 0:
                             x1, y1, x2, y2 = x2, y2, x1, y1
                         real_directions.append(((x1, y1), (x2, y2)))
@@ -157,32 +174,34 @@ class Visualiser(wx.Frame):
                         
                     sizer.Add(synapse_group, flag=wx.EXPAND)
 
-        panel.SetSizer(sizer)
+                else:
+                    sizer.Add(wx.Panel(panel))
+                
 
     def set_weights(self):
 
         for ((x1, y1), (x2, y2)), synapse_group in self.internal_synapses.iteritems():
-            weight = self.esn.get_internal_weight(x1, y1, x2, y2)
+            weight = self.network.get_internal_weight(x1, y1, x2, y2)
             synapse_group.set_weight(((x1, y1), (x2, y2)), weight)
 
         for (x, y), neuron in self.internal_neurons.iteritems():
-            weight = self.esn.get_internal_to_output_weight(0, x, y)
+            weight = self.network.get_internal_to_output_weight(0, x, y)
             neuron.weight = weight
 
         for i, neuron in self.input_neurons.iteritems():
-            weight = self.esn.get_input_to_output_weight(0, i)
+            weight = self.network.get_input_to_output_weight(0, i)
             neuron.weight = weight
 
-    def on_training_update(self, data, actual_output=None):
+    def refresh(self, data, actual_output=None):
 
         for i, neuron in self.input_neurons.iteritems():
             neuron.set_activations(data[:, i])
 
         for (x, y), neuron in self.internal_neurons.iteritems():
-            neuron.set_activations(data[:, self.esn.n_input_units + self.esn.point_to_index(x, y)])
+            neuron.set_activations(data[:, self.network.n_input_units + self.network.point_to_index(x, y)])
             
         for i, neuron in self.output_neurons.iteritems():
-            activations = data[:, self.esn.n_input_units + self.esn.n_internal_units + i]
+            activations = data[:, self.network.n_input_units + self.network.n_internal_units + i]
             if actual_output is not None:
                 neuron.set_activations(activations, actual_output[:, i])
             else:
@@ -330,7 +349,6 @@ class Neuron(Sprite):
             dc.DrawLine(x1, y1, x2, y2)
 
 
-app = None
 visualiser = None
 esn = None
 
@@ -426,13 +444,18 @@ def instrumentalness():
 
     train_skip = sys.argv[1]
     test_skip = sys.argv[2]
+    pkl = sys.argv[3] if len(sys.argv) > 3 else None
     n_forget_points = 0
 
     train_input, train_output, train_splits, test_input, test_output, test_splits, esn = test_data.instrumentalness()
 
     visualiser = Visualiser(esn, output_yscale=.3)
 
-    esn.train(train_input, train_output, callback=refresh, n_forget_points=n_forget_points, callback_every=int(train_skip), reset_points=train_splits)
+    if pkl:
+        with open(pkl) as f:
+            esn.unserialize(cPickle.load(f))
+    else:
+        esn.train(train_input, train_output, callback=refresh, n_forget_points=n_forget_points, callback_every=int(train_skip), reset_points=train_splits)
 
     visualiser.set_weights()
     esn.reset_state()
@@ -440,6 +463,8 @@ def instrumentalness():
     esn.noise_level = 0
 
     #test_input, test_output, test_splits = train_input, train_output, train_splits
+
+    import ipdb; ipdb.set_trace()
 
     print 'test'
     estimated_output = esn.test(test_input, n_forget_points=n_forget_points, callback_every=int(test_skip), callback=refresh, reset_points=test_splits, actual_output=test_output * esn.teacher_scaling + esn.teacher_shift)
@@ -503,7 +528,6 @@ if __name__ == '__main__':
     # train_skip=400
     # test_skip=400
 
-    app = wx.App()
     instrumentalness()
     #music()
     #generic()
