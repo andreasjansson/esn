@@ -4,6 +4,7 @@ import simplejson as json
 import csv
 import matplotlib.pyplot as plt
 import os
+import time
 
 DATA_DIR = os.path.expanduser('~/data/billboard')
 
@@ -72,9 +73,9 @@ def main():
         n_input_units=n_input_units,
 #        width=30,
 #        height=10,
-        width=60,
-        height=60,
-        connectivity=0.05,
+        width=30,
+        height=30,
+        connectivity=0.02,
         n_output_units=n_output_units,
         input_scaling=[2] * n_input_units,
         input_shift=[-.5] * n_input_units,
@@ -88,7 +89,9 @@ def main():
         output_activation_function='tanh'
     )
 
-    n_train = 10
+    t0 = time.time()
+
+    n_train = 100
     meta_data = read_meta_data()
     input, output, split_points = read_data(meta_data.keys()[:n_train])
 
@@ -97,12 +100,12 @@ def main():
 
     n_forget_points = 0
 
-    import statprof
-    statprof.start()
+#    import statprof
+#    statprof.start()
     network.train(input, output, reset_points=split_points, n_forget_points=n_forget_points)
-    statprof.stop()
-    statprof.display()
-    import ipdb; ipdb.set_trace()
+#    statprof.stop()
+#    statprof.display()
+#    import ipdb; ipdb.set_trace()
 
     network.noise_level = 0
 
@@ -119,19 +122,25 @@ def main():
 #    plt.plot(np.argmax(estimated_output, 1))
 #    plt.show()
 
-    
+    total_time = time.time() - t0
+
     lr_output_weights = (np.linalg.pinv(input).dot(output))
     lr_output = input.dot(lr_output_weights)
 
     correct = np.sum(np.argmax(output, 1) == np.argmax(estimated_output, 1))
     lr_correct = np.sum(np.argmax(output, 1) == np.argmax(lr_output, 1))
 
+    print '######## total time: %f' % total_time
+    print '######## correct: %f (%f%%)' % (correct, correct / float(len(output)))
+    print '######## lr_correct: %f (%f%%)' % (lr_correct, lr_correct / float(len(output)))
+
+    
 #    plt.plot(np.argmax(output, 1))
 #    plt.plot(np.argmax(estimated_output, 1))
 #    plt.plot(np.argmax(lr_output, 1))
 #    plt.show()
 
-    #import ipdb; ipdb.set_trace()
+    import ipdb; ipdb.set_trace()
 
 def read_meta_data():
     meta_data = {}
