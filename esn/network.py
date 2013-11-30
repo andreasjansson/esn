@@ -6,8 +6,8 @@ import itertools
 import cma
 #from profilestats import profile
 import numpy as np
-import numpy as gpu
-#import gnumpy as gpu
+#import numpy as gpu
+import gnumpy as gpu
 import functools
 
 #has_cuda = False
@@ -188,10 +188,11 @@ class EchoStateNetwork(object):
         return self._normalise_internal_weights(internal_weights)
 
     def _normalise_internal_weights(self, internal_weights):
-        import ipdb; ipdb.set_trace()
         internal_weights[gpu.where(internal_weights != 0)] -= .5
-        #eigvals = np.linalg.eigvals(internal_weights.as_numpy_array())
-        eigvals = np.linalg.eigvals(internal_weights)
+        if gpu == np:
+            eigvals = np.linalg.eigvals(internal_weights)
+        else:
+            eigvals = np.linalg.eigvals(internal_weights.as_numpy_array())
         radius = gpu.max(gpu.abs(eigvals))
         internal_weights /= radius
         internal_weights *= self.spectral_radius
@@ -292,8 +293,10 @@ class NeighbourESN(EchoStateNetwork):
 
 
 def nrmse(estimated, correct):
-    #correct_variance = np.var(correct.as_numpy_array())
-    correct_variance = np.var(correct)
+    if gpu == np:
+        correct_variance = np.var(correct)
+    else:
+        correct_variance = np.var(correct.as_numpy_array())
     if correct_variance == 0:
         correct_variance = 0.01 # hack
 
@@ -359,6 +362,8 @@ def linear_regression(state_matrix, teacher_matrix):
     run_length = state_matrix.shape[0]
     cov_mat = state_matrix.T.dot(state_matrix / run_length)
     p_vec = state_matrix.T.dot(teacher_matrix / run_length)
-    #inv = gpu.garray(np.linalg.inv(cov_mat.as_numpy_array()))
-    inv = gpu.garray(np.linalg.inv(cov_mat))
+    if gpu == np:
+        inv = gpu.garray(np.linalg.inv(cov_mat))
+    else:
+        inv = gpu.garray(np.linalg.inv(cov_mat.as_numpy_array()))
     return (inv.dot(p_vec)).T
