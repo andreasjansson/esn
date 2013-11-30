@@ -3,8 +3,9 @@ import numpy as np
 import simplejson as json
 import csv
 import matplotlib.pyplot as plt
+import os
 
-DATA_DIR='/home/andreas/data/billboard'
+DATA_DIR = os.path.expanduser('~/data/billboard')
 
 ENHARMONIC_EQUIVALENTS = {
     'Db': 'C#',
@@ -71,8 +72,8 @@ def main():
         n_input_units=n_input_units,
 #        width=30,
 #        height=10,
-        width=6,
-        height=6,
+        width=100,
+        height=100,
         connectivity=0.05,
         n_output_units=n_output_units,
         input_scaling=[2] * n_input_units,
@@ -87,18 +88,21 @@ def main():
         output_activation_function='tanh'
     )
 
-    n_train = 10
+    n_train = 50
     meta_data = read_meta_data()
     input, output, split_points = read_data(meta_data.keys()[:n_train])
 
-    visualiser = esn.Visualiser(network, 1000, input_yscale=.5, internal_yscale=.5, output_yscale=.5)
+    if hasattr(esn, 'Visualiser'):
+        visualiser = esn.Visualiser(network, 1000, input_yscale=.5, internal_yscale=.5, output_yscale=.5)
 
     n_forget_points = 0
 
     network.train(input, output, reset_points=split_points, n_forget_points=n_forget_points)
 
     network.noise_level = 0
-    visualiser.set_weights()
+
+    if hasattr(esn, 'Visualiser'):
+        visualiser.set_weights()
 
     estimated_output = network.test(
         input, n_forget_points=n_forget_points, reset_points=split_points,
@@ -117,12 +121,12 @@ def main():
     correct = np.sum(np.argmax(output, 1) == np.argmax(estimated_output, 1))
     lr_correct = np.sum(np.argmax(output, 1) == np.argmax(lr_output, 1))
 
-    plt.plot(np.argmax(output, 1))
-    plt.plot(np.argmax(estimated_output, 1))
-    plt.plot(np.argmax(lr_output, 1))
-    plt.show()
+#    plt.plot(np.argmax(output, 1))
+#    plt.plot(np.argmax(estimated_output, 1))
+#    plt.plot(np.argmax(lr_output, 1))
+#    plt.show()
 
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
 
 def read_meta_data():
     meta_data = {}

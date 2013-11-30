@@ -1,2 +1,5 @@
 from network import EchoStateNetwork, NeighbourESN, Optimiser, nrmse
-from visualise import Visualiser
+try:
+    from visualise import Visualiser
+except ImportError:
+    pass

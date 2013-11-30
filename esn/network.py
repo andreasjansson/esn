@@ -12,9 +12,12 @@ try:
     import pycuda.cumath as cumath
     import pycuda.autoinit
     from scikits.cuda import linalg as cuda_linalg
+    cuda_linalg.init()
     has_cuda = True
 except ImportError:
     has_cuda = False
+
+#has_cuda = False
 
 class EchoStateNetwork(object):
 
@@ -74,8 +77,8 @@ class EchoStateNetwork(object):
         self.reset_state()
 
     def reset_state(self):
-        self.total_state = maybe_cuda(np.zeros((self.n_input_units + self.n_internal_units +
-                                                self.n_output_units, 1)))
+        self.total_state = np.zeros((self.n_input_units + self.n_internal_units +
+                                     self.n_output_units, 1))
         self.internal_state = maybe_cuda(np.zeros((self.n_internal_units, 1)))
         self.internal_state = maybe_cuda(np.zeros((self.n_internal_units, 1)))
 
@@ -108,8 +111,8 @@ class EchoStateNetwork(object):
     def test(self, input, n_forget_points=0, reset_points=None, actual_output=None):
         state_matrix = self._compute_state_matrix(input, n_forget_points=n_forget_points,
                                                   reset_points=reset_points, actual_output=actual_output)
-        output = maybe_cuda_dot(state_matrix, self.output_weights.T)
-        output = self.output_activation_function(output)
+        output = maybe_cuda_dot(maybe_cuda(state_matrix), self.output_weights.T)
+        output = no_cuda(self.output_activation_function(output))
         output -= self.teacher_shift
         output /= self.teacher_scaling
 
@@ -141,8 +144,8 @@ class EchoStateNetwork(object):
 
     def _compute_state_matrix(self, input, output=None, n_forget_points=0,
                               reset_points=None, actual_output=None):
-        state_matrix = maybe_cuda(np.zeros((len(input) - n_forget_points,
-                                 self.n_input_units + self.n_internal_units)))
+        state_matrix = np.zeros((len(input) - n_forget_points,
+                                 self.n_input_units + self.n_internal_units))
 
         if self.callback:
             callback_state = np.zeros((self.callback_every, self.n_input_units + self.n_internal_units + self.n_output_units))
@@ -167,12 +170,13 @@ class EchoStateNetwork(object):
             else:
                 self._update_internal_state_leaky()
 
-            self.total_state[:self.n_internal_units, :] = self.internal_state
+            self.total_state[:self.n_internal_units, :] = no_cuda(self.internal_state)
             self.total_state[self.n_internal_units:self.n_internal_units + self.n_input_units, :] = scaled_input
 
             if output is None:
                 scaled_output = self.output_activation_function(
-                    maybe_cuda_dot(self.output_weights, self.total_state[:-self.n_output_units, :]))
+                    maybe_cuda_dot(self.output_weights, maybe_cuda(self.total_state[:-self.n_output_units, :])))
+                scaled_output = no_cuda(scaled_output)
             else:
                 scaled_output = self.teacher_scaling * output[i,:] + self.teacher_shift
                 scaled_output = scaled_output.reshape((len(scaled_output), 1))
@@ -180,8 +184,11 @@ class EchoStateNetwork(object):
             self.total_state[-self.n_output_units:, :] = scaled_output
 
             if i >= n_forget_points:
-                state_matrix[i - n_forget_points, :self.n_internal_units] = self.internal_state.T
+                state_matrix[i - n_forget_points, :self.n_internal_units] = no_cuda(self.internal_state).T
                 state_matrix[i - n_forget_points, self.n_internal_units:] = scaled_input.T
+
+            if i % 100 == 0:
+                print i, len(input)
 
             if self.callback:
                 callback_state[i % self.callback_every,:] = np.vstack((scaled_input, self.internal_state, scaled_output)).T
@@ -207,11 +214,11 @@ class EchoStateNetwork(object):
         self.internal_state += self.noise_level * (np.random.rand(self.n_internal_units, 1) - .5)
 
     def _update_internal_state(self):
-        self.internal_state = self.reservoir_activation_function(np.dot(self.fixed_weights, self.total_state))
-        self.internal_state += self.noise_level * (np.random.rand(self.n_internal_units, 1) - .5)
+        self.internal_state = self.reservoir_activation_function(maybe_cuda_dot(self.fixed_weights, maybe_cuda(self.total_state)))
+        self.internal_state += self.noise_level * (maybe_cuda(np.random.rand(self.n_internal_units, 1)) - .5)
 
     def _compute_teacher_matrix(self, output, n_forget_points):
-        teacher = self.teacher_scaling * output[n_forget_points:, :] + self.teacher_shift
+        teacher = maybe_cuda(self.teacher_scaling * output[n_forget_points:, :] + self.teacher_shift)
         return self.inverse_output_activation_function(teacher)
 
     def _generate_input_weights(self):
@@ -424,13 +431,19 @@ class Optimiser(object):
 
 def maybe_cuda(x):
     if has_cuda:
-        return gpuarray.to_gpu(x)
+        return gpuarray.to_gpu(x).astype('float32')
+    else:
+        return x
+
+def no_cuda(x):
+    if has_cuda:
+        return x.get()
     else:
         return x
 
 def maybe_cuda_dot(x, y):
     if has_cuda:
-        return gpuarray.dot(x, y)
+        return cuda_linalg.dot(x, y)
     else:
         return np.dot(x, y)
 
@@ -460,7 +473,7 @@ def function_from_name(name, return_inverse=False):
 
 def linear_regression_maybe_cuda(state_matrix, teacher_matrix):
     if has_cuda:
-        return (cuda_linalg.pinv(state_matrix).dot(teacher_matrix)).T
+        return cuda_linalg.transpose(maybe_cuda_dot(cuda_linalg.pinv(maybe_cuda(state_matrix)), teacher_matrix))
     else:
         run_length = np.shape(state_matrix)[0]
         cov_mat = state_matrix.T.dot(state_matrix / run_length)
