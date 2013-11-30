@@ -17,11 +17,11 @@ class EchoStateNetwork(object):
                  connectivity,
                  input_scaling,
                  input_shift,
-                 teacher_scaling,
-                 teacher_shift,
-                 noise_level,
                  spectral_radius,
-                 feedback_scaling,
+                 teacher_scaling=None,
+                 teacher_shift=None,
+                 noise_level=0,
+                 feedback_scaling=0,
                  leakage=0,
                  reservoir_activation_function='tanh',
                  output_activation_function='identity'):
@@ -63,10 +63,9 @@ class EchoStateNetwork(object):
         self.reset_state()
 
     def reset_state(self):
-        self.total_state = np.zeros((self.n_input_units + self.n_internal_units +
-                                      self.n_output_units, 1), dtype='float32')
-        self.internal_state = np.zeros((self.n_internal_units, 1), dtype='float32')
-        self.internal_state = np.zeros((self.n_internal_units, 1), dtype='float32')
+        self.total_state = np.zeros(self.n_input_units + self.n_internal_units +
+                                    self.n_output_units, dtype='float32')
+        self.internal_state = np.zeros(self.n_internal_units, dtype='float32')
 
     def serialize(self):
         return {
@@ -82,7 +81,6 @@ class EchoStateNetwork(object):
         self.feedback_weights = obj['feedback_weights']
         self.output_weights = obj['output_weights']
 
-    #@profile
     def train(self, input, output, n_forget_points=0, reset_points=None):
         assert len(input) == len(output)
         assert input.shape[1] == self.n_input_units
@@ -99,8 +97,10 @@ class EchoStateNetwork(object):
                                                   reset_points=reset_points, actual_output=actual_output)
         output = np.dot(state_matrix, self.output_weights.T)
         output = self.output_activation_function(output)
-        output -= self.teacher_shift
-        output /= self.teacher_scaling
+        if self.teacher_shift is not None:
+            output -= self.teacher_shift
+        if self.teacher_scaling is not None:
+            output /= self.teacher_scaling
 
         return output
 
@@ -120,8 +120,7 @@ class EchoStateNetwork(object):
             if reset_points is not None and i in reset_points:
                 self.reset_state()
 
-            scaled_input = (self.input_scaling * input_point + self.input_shift).reshape(
-                len(input_point), 1)
+            scaled_input = (self.input_scaling * input_point + self.input_shift)
 
             self.total_state[self.n_internal_units :
                              self.n_internal_units + self.n_input_units] = scaled_input
@@ -130,20 +129,23 @@ class EchoStateNetwork(object):
             else:
                 self._update_internal_state()
 
-            self.total_state[:self.n_internal_units, :] = self.internal_state
-            self.total_state[self.n_internal_units:self.n_internal_units + self.n_input_units, :] = scaled_input
+            self.total_state[:self.n_internal_units] = self.internal_state
+            self.total_state[self.n_internal_units:self.n_internal_units + self.n_input_units] = scaled_input
 
             if output is None:
-                scaled_output = self.output_activation_function(self.output_weights.dot(self.total_state[:-self.n_output_units, :]))
+                scaled_output = self.output_activation_function(self.output_weights.dot(self.total_state[:-self.n_output_units]))
             else:
-                scaled_output = self.teacher_scaling * output[i,:] + self.teacher_shift
-                scaled_output = scaled_output.reshape((len(scaled_output), 1))
+                scaled_output = output[i,:]
+                if self.teacher_scaling is not None:
+                    scaled_output *= self.teacher_scaling
+                if self.teacher_shift is not None:
+                    scaled_output += self.teacher_shift
 
-            self.total_state[-self.n_output_units:, :] = scaled_output
+            self.total_state[-self.n_output_units:] = scaled_output
 
             if i >= n_forget_points:
-                state_matrix[i - n_forget_points, :self.n_internal_units] = self.internal_state.T
-                state_matrix[i - n_forget_points, self.n_internal_units:] = scaled_input.T
+                state_matrix[i - n_forget_points, :self.n_internal_units] = self.internal_state
+                state_matrix[i - n_forget_points, self.n_internal_units:] = scaled_input
 
             if i % 1000 == 0:
                 print i, len(input)
@@ -161,18 +163,23 @@ class EchoStateNetwork(object):
 
     def _update_internal_state(self):
         self.internal_state = self.reservoir_activation_function(self.fixed_weights.dot(self.total_state))
-        self.internal_state += self.noise_level * (np.random.rand(self.n_internal_units, 1) - .5).astype('float32')
+        self.internal_state += self.noise_level * (np.random.rand(self.n_internal_units) - .5).astype('float32')
 
 
     def _update_internal_state_leaky(self):
-        previous_internal_state = self.total_state[0:self.n_internal_units, :]
+        previous_internal_state = self.total_state[0:self.n_internal_units]
         self.internal_state = ((1 - self.leakage) * previous_internal_state +
                                self.leakage * self.reservoir_activation_function(
                                    self.fixed_weights.dot(self.total_state)))
-        self.internal_state += self.noise_level * (np.random.rand(self.n_internal_units, 1) - .5).astype('float32')
+        self.internal_state += self.noise_level * (np.random.rand(self.n_internal_units) - .5).astype('float32')
 
     def _compute_teacher_matrix(self, output, n_forget_points):
-        teacher = self.teacher_scaling * output[n_forget_points:, :] + self.teacher_shift
+        teacher = output[n_forget_points:, :]
+        if self.teacher_scaling is not None:
+            teacher *= self.teacher_scaling
+        if self.teacher_shift is not None:
+            teacher += self.teacher_shift
+
         return self.inverse_output_activation_function(teacher)
 
     def _generate_input_weights(self):

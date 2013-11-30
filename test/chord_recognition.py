@@ -5,8 +5,6 @@
 
 # TODO:
 # * bias input (with different scaling)
-# * sparse matrices
-# * larger reservoir
 # * remove smaller principal components
 # * experiment with band-pass filters (especially when training on audio, similar to auditory models)
 # * train on audio
@@ -75,39 +73,19 @@ def main():
     n_input_units = 12
     n_output_units = len(CHORD_MAP)
 
-    # network = esn.NeighbourESN(
-    #     n_input_units=n_input_units,
-    #     width=10,
-    #     height=8,
-    #     n_output_units=n_output_units,
-    #     input_scaling=[2] * n_input_units,
-    #     input_shift=[-.5] * n_input_units,
-    #     teacher_scaling=[1] * n_output_units,
-    #     teacher_shift=[0] * n_output_units,
-    #     noise_level=0.001,
-    #     spectral_radius=1.2,
-    #     feedback_scaling=[0] * n_output_units,
-    #     leakage=0,
-    #     time_constants=None,
-    #     output_activation_function='identity'
-    # )
-
     network = esn.EchoStateNetwork(
         n_input_units=n_input_units,
-        width=20,
-        height=20,
+        width=60,
+        height=60,
         connectivity=0.02,
         n_output_units=n_output_units,
-#        input_scaling=[1] * n_input_units,
-#        input_shift=[0] * n_input_units,        
         input_scaling=[2] * n_input_units,
         input_shift=[-.5] * n_input_units,
-        teacher_scaling=[.9] * n_output_units,
-        teacher_shift=[0] * n_output_units,
         noise_level=0.001,
         spectral_radius=.1,
         feedback_scaling=[0] * n_output_units,
         leakage=.1,
+        teacher_scaling=.99,
         output_activation_function='tanh'
     )
 
@@ -136,8 +114,8 @@ def main():
         visualiser.set_weights()
 
     estimated_output = network.test(
-        input, n_forget_points=n_forget_points, reset_points=split_points,
-        actual_output=output * network.teacher_scaling + network.teacher_shift)
+        input, n_forget_points=n_forget_points, reset_points=split_points, actual_output=output)
+        
 
     error = esn.nrmse(estimated_output, output[n_forget_points:])
 
