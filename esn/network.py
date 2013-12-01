@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.sparse
+import scipy.sparse.linalg
 import matplotlib.pyplot as plt
 import copy
 import itertools
@@ -56,9 +57,10 @@ class EchoStateNetwork(object):
 
         scaled_feedback_weights = np.dot(self.feedback_weights, np.diagflat(self.feedback_scaling))
         scaled_feedback_weights = scaled_feedback_weights.reshape((len(self.feedback_weights), self.n_output_units))
-        self.fixed_weights = scipy.sparse.csr_matrix(
-            np.hstack((self.internal_weights.todense(), self.input_weights, scaled_feedback_weights)),
-            dtype='float32')
+        self.fixed_weights = scipy.sparse.hstack((
+                self.internal_weights,
+                scipy.sparse.csr_matrix(self.input_weights),
+                scipy.sparse.csr_matrix(scaled_feedback_weights)), dtype='float32').tocsr()
 
         self.reset_state()
 
@@ -192,8 +194,19 @@ class EchoStateNetwork(object):
 
     def _normalise_internal_weights(self, internal_weights):
         internal_weights.data -= .5
-        eigvals = np.linalg.eigvals(internal_weights.todense())
-        radius = np.max(np.abs(eigvals))
+        attempts = 5
+        for i in range(attempts):
+            try:
+                eigvals = scipy.sparse.linalg.eigs(
+                    internal_weights, k=1, which='LM',
+                    return_eigenvectors=False, tol=.02, maxiter=5000)
+                break
+            except scipy.sparse.linalg.ArpackNoConvergence:
+                pass
+        else:
+            print 'scipy.sparse.linalg failed to converge, falling back to numpy.linalg'
+            eigvals = np.linalg.eigvals(internal_weights.todense())
+        radius = np.abs(np.max(eigvals))
         internal_weights /= radius
         internal_weights *= self.spectral_radius
         return internal_weights
