@@ -75,12 +75,12 @@ def main():
 
     network = esn.EchoStateNetwork(
         n_input_units=n_input_units,
-        width=10,
-        height=10,
+        width=20,
+        height=20,
         connectivity=0.05,
         n_output_units=n_output_units,
         input_scaling=[0.75] * n_input_units,
-        input_shift=[-.5] * n_input_units,
+        input_shift=[-.25] * n_input_units,
         noise_level=0.001,
         spectral_radius=1.1,
         feedback_scaling=[0] * n_output_units,
