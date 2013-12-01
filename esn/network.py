@@ -155,7 +155,7 @@ class EchoStateNetwork(object):
 #                print i, len(input)
 
             if self.callback:
-                callback_state[i % self.callback_every,:] = np.vstack((scaled_input, self.internal_state, scaled_output)).T
+                callback_state[i % self.callback_every,:] = np.hstack((scaled_input, self.internal_state, scaled_output))
                 if (i + 1) % self.callback_every == 0:
                     print i, len(input)
                     if actual_output is not None:

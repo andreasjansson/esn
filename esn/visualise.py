@@ -68,7 +68,7 @@ class Visualiser(wx.Frame):
 
         for col in range(cols):
             if col % 2 == 0:
-                neuron = Neuron(panel, yscale=self.input_yscale, history_length=300 / cols)
+                neuron = Neuron(panel, yscale=self.input_yscale)
                 self.input_neurons[col / 2] = neuron
                 sizer.Add(neuron, flag=wx.EXPAND)
             else:
@@ -85,7 +85,7 @@ class Visualiser(wx.Frame):
 
         for col in range(cols):
             if col % 2 == 0:
-                neuron = Neuron(panel, yscale=self.output_yscale, history_length=300 / cols)
+                neuron = Neuron(panel, yscale=self.output_yscale)
                 self.output_neurons[col / 2] = neuron
                 sizer.Add(neuron, flag=wx.EXPAND)
             else:
@@ -288,7 +288,7 @@ class SynapseGroup(Sprite):
 
 class Neuron(Sprite):
 
-    def __init__(self, parent, yscale=.5, history_length=20):
+    def __init__(self, parent, yscale=.5, history_length=50):
         super(Neuron, self).__init__(parent)
 
         self.history_length = history_length

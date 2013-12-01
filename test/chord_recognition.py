@@ -5,14 +5,13 @@
 
 # TODO:
 # * bias input (with different scaling)
+# * chord overlap ratio / weighted chord overlap ratio (mirex evaluation)
 # * remove smaller principal components
 # * experiment with band-pass filters (especially when training on audio, similar to auditory models)
 # * train on audio
 # * compare the performance of single to layered reservoirs
 # * sub-populations with different leaking rates
-# * record performance of parameters so as to not go in circles
-# * grid search for parameters (what is grid search ???)
-# * use ridge regression, logarithmic grid search (?) on test data to find \beta
+# * use ridge regression, logarithmic grid search on test data to find \beta
 # * no noise necessary when using ridge regression
 # * make sure resetting between sequences actually works
 # * perhaps run sequences in parallel, if sparse matrices are faster
@@ -76,69 +75,68 @@ def main():
 
     network = esn.EchoStateNetwork(
         n_input_units=n_input_units,
-        width=5,
-        height=5,
-        connectivity=0.1,
+        width=10,
+        height=10,
+        connectivity=0.05,
         n_output_units=n_output_units,
-        input_scaling=[2] * n_input_units,
+        input_scaling=[0.75] * n_input_units,
         input_shift=[-.5] * n_input_units,
         noise_level=0.001,
-        spectral_radius=.1,
+        spectral_radius=1.1,
         feedback_scaling=[0] * n_output_units,
-        leakage=.1,
+        leakage=.2,
         teacher_scaling=.99,
         output_activation_function='tanh'
     )
 
     t0 = time.time()
 
-    n_train = 20
-    n_test = 20
+    n_train = 50
+    n_test = 30
     meta_data = read_meta_data()
     ids = meta_data.keys()
     random.shuffle(ids)
     train_ids = ids[:n_train]
     test_ids = ids[n_train:n_train + n_test]
-    input, output, split_points = read_data(ids[:n_train])
+    train_input, train_output, train_split_points = read_data(ids[:n_train])
+    test_input, test_output, test_split_points = read_data(ids[n_train:n_train + n_test])
 
+#    if hasattr(esn, 'Visualiser'):
+#        del esn.Visualiser
     if hasattr(esn, 'Visualiser'):
-        del esn.Visualiser
-    if hasattr(esn, 'Visualiser'):
-        visualiser = esn.Visualiser(network, 1000, input_yscale=.5, internal_yscale=.05, output_yscale=.5)
+        visualiser = esn.Visualiser(network, 1000, input_yscale=.5, internal_yscale=.5, output_yscale=.5)
 
     n_forget_points = 0
 
-    network.train(input, output, reset_points=split_points, n_forget_points=n_forget_points)
+    network.train(train_input, train_output, reset_points=train_split_points, n_forget_points=n_forget_points)
 
     network.noise_level = 0
 
     if hasattr(esn, 'Visualiser'):
         visualiser.set_weights()
 
-    estimated_output = network.test(
-        input, n_forget_points=n_forget_points, reset_points=split_points, actual_output=output)
-        
+    estimated_train_output = network.test(train_input, n_forget_points=n_forget_points, reset_points=train_split_points, actual_output=train_output)
+    train_error = esn.nrmse(estimated_train_output, train_output[n_forget_points:])
+    train_correct = np.sum(np.argmax(train_output[n_forget_points:], 1) == np.argmax(estimated_train_output, 1))
+    train_accuracy = train_correct / float(len(estimated_train_output))
 
-    error = esn.nrmse(estimated_output, output[n_forget_points:])
+    estimated_test_output = network.test(test_input, n_forget_points=n_forget_points, reset_points=test_split_points, actual_output=test_output)
+    test_error = esn.nrmse(estimated_test_output, test_output[n_forget_points:])
+    test_correct = np.sum(np.argmax(test_output[n_forget_points:], 1) == np.argmax(estimated_test_output, 1))
+    test_accuracy = test_correct / float(len(estimated_test_output))
+
+    total_time = time.time() - t0
+
+    print '######## total time: %f' % total_time
+    print '######## train accuracy: %f%%' % train_accuracy
+    print '######## test accuracy: %f%%' % test_accuracy
+    
 
 #    plt.plot(np.argmax(output[n_forget_points: ], 1))
 #    plt.plot(np.argmax(estimated_output, 1))
 #    plt.show()
 
-    total_time = time.time() - t0
-
-    correct = np.sum(np.argmax(output, 1) == np.argmax(estimated_output, 1))
-
-    print '######## total time: %f' % total_time
-    print '######## correct: %f (%f%%)' % (correct, correct / float(len(output)))
-    
-#    plt.plot(np.argmax(output, 1))
-#    plt.plot(np.argmax(estimated_output, 1))
-#    plt.plot(np.argmax(lr_output, 1))
-#    plt.show()
-
     import ipdb; ipdb.set_trace()
-
 
 
 def read_meta_data():
