@@ -26,6 +26,7 @@ import csv
 import matplotlib.pyplot as plt
 import os
 import time
+import random
 
 DATA_DIR = os.path.expanduser('~/data/billboard')
 
@@ -75,9 +76,9 @@ def main():
 
     network = esn.EchoStateNetwork(
         n_input_units=n_input_units,
-        width=60,
-        height=60,
-        connectivity=0.02,
+        width=50,
+        height=50,
+        connectivity=0.01,
         n_output_units=n_output_units,
         input_scaling=[2] * n_input_units,
         input_shift=[-.5] * n_input_units,
@@ -92,8 +93,13 @@ def main():
     t0 = time.time()
 
     n_train = 50
+    n_test = 20
     meta_data = read_meta_data()
-    input, output, split_points = read_data(meta_data.keys()[:n_train])
+    ids = meta_data.keys()
+    random.shuffle(ids)
+    train_ids = ids[:n_train]
+    test_ids = ids[n_train:n_train + n_test]
+    input, output, split_points = read_data(ids[:n_train])
 
     del esn.Visualiser
     if hasattr(esn, 'Visualiser'):
@@ -101,12 +107,7 @@ def main():
 
     n_forget_points = 0
 
-#    import statprof
-#    statprof.start()
     network.train(input, output, reset_points=split_points, n_forget_points=n_forget_points)
-#    statprof.stop()
-#    statprof.display()
-#    import ipdb; ipdb.set_trace()
 
     network.noise_level = 0
 
@@ -125,16 +126,10 @@ def main():
 
     total_time = time.time() - t0
 
-    lr_output_weights = (np.linalg.pinv(input).dot(output))
-    lr_output = input.dot(lr_output_weights)
-
     correct = np.sum(np.argmax(output, 1) == np.argmax(estimated_output, 1))
-    lr_correct = np.sum(np.argmax(output, 1) == np.argmax(lr_output, 1))
 
     print '######## total time: %f' % total_time
     print '######## correct: %f (%f%%)' % (correct, correct / float(len(output)))
-    print '######## lr_correct: %f (%f%%)' % (lr_correct, lr_correct / float(len(output)))
-
     
 #    plt.plot(np.argmax(output, 1))
 #    plt.plot(np.argmax(estimated_output, 1))
