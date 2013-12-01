@@ -3,6 +3,7 @@ import random
 import itertools
 import multiprocessing
 import signal
+import simplejson as json
 
 import esn
 import chord_recognition
@@ -34,21 +35,23 @@ def get_score(params):
 
     correct = np.sum(np.argmax(output, 1) == np.argmax(estimated_output, 1))
 
-    print 'connectivity: %.2f' % params['connectivity']
-    print 'input_scaling: %.2f' % params['input_scaling']
-    print 'spectral_radius: %.2f' % params['spectral_radius']
-    print 'leakage: %.2f' % params['leakage']
-    print 'correct: %.2f%%' % (correct / float(len(output)))
+    score = correct / float(len(output))
 
-    return correct
+#    print 'connectivity: %.2f' % params['connectivity']
+#    print 'input_scaling: %.2f' % params['input_scaling']
+#    print 'spectral_radius: %.2f' % params['spectral_radius']
+#    print 'leakage: %.2f' % params['leakage']
+    print 'correct: %.2f%%' % score
+
+    return score
 
 def main():
     global input, output, split_points
 
     # set OPENBLAS_NUM_THREADS before running!
-    n_grid_threads = 4
+    n_grid_threads = 32
 
-    n_train = 30
+    n_train = 50
     meta_data = chord_recognition.read_meta_data()
     ids = meta_data.keys()
     random.shuffle(ids)
@@ -56,9 +59,9 @@ def main():
 
     grid = {
         'connectivity': [.01, .02, .05, .1, .3],
-        'spectral_radius': [.1, .4, .7, 1, 1.2],
-        'leakage': [.1, .4, .7],
-        'input_scaling': [.1, .5, 1, 2, 4],
+        'spectral_radius': [.8, .9, 1, 1.1, 1.2, 1.3],
+        'leakage': [.02, .05, .1, .2],
+        'input_scaling': [.5, .75, 1, 1.5],
     }
 
     items = sorted(grid.items())
@@ -67,10 +70,10 @@ def main():
 
     pool = multiprocessing.Pool(n_grid_threads)
 
-    scores = pool.map(get_score, grid_points)
+    scores = pool.map(get_score, grid_points, chunksize=1)
 
     with open('scores.json', 'w') as f:
-        json.dump(f, zip(grid_points, scores))
+        json.dump(zip(grid_points, scores), f)
 
 if __name__ == '__main__':
     main()

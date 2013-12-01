@@ -151,8 +151,8 @@ class EchoStateNetwork(object):
                 state_matrix[i - n_forget_points, :self.n_internal_units] = self.internal_state
                 state_matrix[i - n_forget_points, self.n_internal_units:] = scaled_input
 
-            if i % 1000 == 0:
-                print i, len(input)
+#            if i % 1000 == 0:
+#                print i, len(input)
 
             if self.callback:
                 callback_state[i % self.callback_every,:] = np.vstack((scaled_input, self.internal_state, scaled_output)).T
