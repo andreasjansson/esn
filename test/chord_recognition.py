@@ -73,6 +73,10 @@ def main():
     n_input_units = 12
     n_output_units = len(CHORD_MAP)
 
+    import ipdb; ipdb.set_trace()
+
+    import statprof
+    statprof.start()
     network = esn.EchoStateNetwork(
         n_input_units=n_input_units,
         width=60,
@@ -88,6 +92,9 @@ def main():
         teacher_scaling=.99,
         output_activation_function='tanh'
     )
+    statprof.stop()
+    statprof.display()
+    import ipdb; ipdb.set_trace()
 
     t0 = time.time()
 
@@ -95,7 +102,8 @@ def main():
     meta_data = read_meta_data()
     input, output, split_points = read_data(meta_data.keys()[:n_train])
 
-    del esn.Visualiser
+    if hasattr(esn, 'Visualiser'):
+        del esn.Visualiser
     if hasattr(esn, 'Visualiser'):
         visualiser = esn.Visualiser(network, 1000, input_yscale=.5, internal_yscale=.05, output_yscale=.5)
 
