@@ -25,7 +25,8 @@ class EchoStateNetwork(object):
                  feedback_scaling=0,
                  leakage=0,
                  reservoir_activation_function='tanh',
-                 output_activation_function='identity'):
+                 output_activation_function='identity',
+                 num_threads=1):
 
         self.n_input_units = n_input_units
         self.width = width
@@ -45,6 +46,7 @@ class EchoStateNetwork(object):
         self.callback = None
         self.callback_every = None
         self.output_activation_function, self.inverse_output_activation_function = function_from_name(output_activation_function, return_inverse=True)
+        self.num_threads = num_threads
 
         self.reset()
 
@@ -201,8 +203,9 @@ class EchoStateNetwork(object):
                     internal_weights, k=1, which='LM',
                     return_eigenvectors=False, tol=.02, maxiter=5000)
                 break
-            except scipy.sparse.linalg.ArpackNoConvergence:
-                pass
+            except (scipy.sparse.linalg.ArpackNoConvergence,
+                    scipy.sparse.linalg.ArpackError):
+                continue
         else:
             print 'scipy.sparse.linalg failed to converge, falling back to numpy.linalg'
             eigvals = np.linalg.eigvals(internal_weights.todense())

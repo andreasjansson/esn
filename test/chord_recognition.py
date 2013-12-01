@@ -74,13 +74,11 @@ def main():
     n_input_units = 12
     n_output_units = len(CHORD_MAP)
 
-    import statprof
-    #statprof.start()
     network = esn.EchoStateNetwork(
         n_input_units=n_input_units,
-        width=60,
-        height=60,
-        connectivity=0.01,
+        width=5,
+        height=5,
+        connectivity=0.1,
         n_output_units=n_output_units,
         input_scaling=[2] * n_input_units,
         input_shift=[-.5] * n_input_units,
@@ -91,12 +89,10 @@ def main():
         teacher_scaling=.99,
         output_activation_function='tanh'
     )
-    #statprof.stop()
-    #statprof.display()
 
     t0 = time.time()
 
-    n_train = 200
+    n_train = 20
     n_test = 20
     meta_data = read_meta_data()
     ids = meta_data.keys()
@@ -142,6 +138,8 @@ def main():
 #    plt.show()
 
     import ipdb; ipdb.set_trace()
+
+
 
 def read_meta_data():
     meta_data = {}
