@@ -17,6 +17,11 @@
 # * perhaps run sequences in parallel, if sparse matrices are faster
 # * try logistic regression instead of a second reservoir to improve the estimated output (obviously lacking history)
 # * use hmm on final outputs
+# * include echo nest tibre vector in input
+# * bandpass filters
+# * bandpass filtered different unconnected esn
+# * stack networks
+# * treat stacked networks as a mlp
 
 import esn
 import numpy as np
@@ -69,40 +74,42 @@ CHORD_MAP = {
     'X': 25,
 }
 
-def main():
-    n_input_units = 12
+def run(train_input, train_output, train_split_points, test_input, test_output, test_split_points):
+
+    n_input_units = train_input.shape[1]
     n_output_units = len(CHORD_MAP)
+
+    if n_input_units == 24:
+        input_scaling = [0.75] * 12 + [.01] * 12
+        input_shift = [-0.25] * 12 + [0] * 12
+    elif n_input_units == 12:
+        input_scaling = [0.75] * 12
+        input_shift = [-0.25] * 12
+    elif n_input_units == 13:
+        input_scaling = [0.75] * 12 + [.05]
+        input_shift = [-0.25] * 12 + [.2]
+
+    width = height = 20
 
     network = esn.EchoStateNetwork(
         n_input_units=n_input_units,
-        width=20,
-        height=20,
+        width=width,
+        height=height,
         connectivity=0.05,
         n_output_units=n_output_units,
-        input_scaling=[0.75] * n_input_units,
-        input_shift=[-.25] * n_input_units,
-        noise_level=0.001,
+        input_scaling=input_scaling,
+        input_shift=input_shift,
+        #noise_level=0.001,
+        noise_level=0,
         spectral_radius=1.1,
         feedback_scaling=[0] * n_output_units,
-        leakage=.2,
+        leakage=np.array([.2] * (width * height * 2/4) + [.5] * (width * height * 2/4)),
         teacher_scaling=.99,
         output_activation_function='tanh'
     )
 
-    t0 = time.time()
-
-    n_train = 50
-    n_test = 30
-    meta_data = read_meta_data()
-    ids = meta_data.keys()
-    random.shuffle(ids)
-    train_ids = ids[:n_train]
-    test_ids = ids[n_train:n_train + n_test]
-    train_input, train_output, train_split_points = read_data(ids[:n_train])
-    test_input, test_output, test_split_points = read_data(ids[n_train:n_train + n_test])
-
-#    if hasattr(esn, 'Visualiser'):
-#        del esn.Visualiser
+    if hasattr(esn, 'Visualiser'):
+        del esn.Visualiser
     if hasattr(esn, 'Visualiser'):
         visualiser = esn.Visualiser(network, 1000, input_yscale=.5, internal_yscale=.5, output_yscale=.5)
 
@@ -125,16 +132,42 @@ def main():
     test_correct = np.sum(np.argmax(test_output[n_forget_points:], 1) == np.argmax(estimated_test_output, 1))
     test_accuracy = test_correct / float(len(estimated_test_output))
 
-    total_time = time.time() - t0
+    return estimated_train_output, estimated_test_output, train_accuracy, test_accuracy
 
-    print '######## total time: %f' % total_time
+def main():
+    n_train = 100
+    n_test = 50
+    meta_data = read_meta_data()
+    ids = meta_data.keys()
+    random.shuffle(ids)
+    train_ids = ids[:n_train]
+    test_ids = ids[n_train:n_train + n_test]
+    train_input, train_output, train_split_points = read_data(ids[:n_train])
+    test_input, test_output, test_split_points = read_data(ids[n_train:n_train + n_test])
+
+    n_forget_points = 0
+
+    estimated_train_output, estimated_test_output, train_accuracy, test_accuracy = run(train_input, train_output, train_split_points, test_input, test_output, test_split_points)
+
+    import ipdb; ipdb.set_trace()
+
+    estimated_train_output2, estimated_test_output2, train_accuracy2, test_accuracy2 = run(estimated_train_output, train_output, train_split_points, estimated_test_output, test_output, test_split_points)
+
     print '######## train accuracy: %f%%' % train_accuracy
     print '######## test accuracy: %f%%' % test_accuracy
-    
 
-#    plt.plot(np.argmax(output[n_forget_points: ], 1))
-#    plt.plot(np.argmax(estimated_output, 1))
-#    plt.show()
+    from esn import postprocess
+
+    import ipdb; ipdb.set_trace()
+
+    CHORD_INDEX = {v: k for k, v in CHORD_MAP.items()}
+    [(CHORD_INDEX[i], CHORD_INDEX[j], i == j) for i, j in zip(np.argmax(test_output[4000:5000 ], 1), np.argmax(estimated_test_output[4000:5000 ], 1))]
+
+    plt.imshow(estimated_test_output[:1000, :], aspect='auto', interpolation='none')
+
+    plt.plot(np.argmax(test_output[n_forget_points: ], 1))
+    plt.plot(np.argmax(estimated_test_output, 1))
+    plt.show()
 
     import ipdb; ipdb.set_trace()
 
@@ -165,15 +198,27 @@ def read_data(ids):
 
     return np.array(all_chromas), np.array(all_chords), split_points
 
-def parse_chroma_file(filename):
+def parse_chroma_file(filename, with_timbre=False, with_loudness=False):
     timed_chromas = []
+    max_loudness = float('-inf')
+    min_loudness = float('inf')
     with open(filename) as f:
         raw = json.load(f)
         segments = raw['segments']
         for segment in segments:
             start = segment['start']
             chroma = segment['pitches']
-#            chroma = get_zweiklangs(chroma)
+
+            if with_timbre:
+                timbre = segment['timbre']
+                chroma += timbre
+
+            if with_loudness or 1:
+                loudness = segment['loudness_max']
+                loudness = (loudness + 60) / 60.0
+                chroma = [c * loudness for c in chroma]
+#                chroma += [loudness]
+
             timed_chromas.append((float(start), chroma))
     return timed_chromas
 

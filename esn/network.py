@@ -2,11 +2,9 @@ import numpy as np
 import scipy.sparse
 import scipy.sparse.linalg
 import matplotlib.pyplot as plt
-import copy
-import itertools
 import cma
-#from profilestats import profile
-import functools
+
+from scikits.learn.linear_model import LogisticRegression
 
 class EchoStateNetwork(object):
 
@@ -42,7 +40,7 @@ class EchoStateNetwork(object):
         self.spectral_radius = spectral_radius
         self.feedback_scaling = feedback_scaling
         self.leakage = leakage
-        self.reservoir_activation_function = function_from_name(reservoir_activation_function) # maybe cuda
+        self.reservoir_activation_function = function_from_name(reservoir_activation_function)
         self.callback = None
         self.callback_every = None
         self.output_activation_function, self.inverse_output_activation_function = function_from_name(output_activation_function, return_inverse=True)
@@ -92,7 +90,7 @@ class EchoStateNetwork(object):
 
         state_matrix = self._compute_state_matrix(input, output, n_forget_points, reset_points=reset_points)
         teacher_matrix = self._compute_teacher_matrix(output, n_forget_points)
-        self.output_weights = linear_regression(state_matrix, teacher_matrix)
+        self.output_weights = ridge_regression(state_matrix, teacher_matrix)
 
         return state_matrix
 
@@ -128,7 +126,7 @@ class EchoStateNetwork(object):
 
             self.total_state[self.n_internal_units :
                              self.n_internal_units + self.n_input_units] = scaled_input
-            if self.leakage:
+            if self.leakage is not None:
                 self._update_internal_state_leaky()
             else:
                 self._update_internal_state()
@@ -151,8 +149,8 @@ class EchoStateNetwork(object):
                 state_matrix[i - n_forget_points, :self.n_internal_units] = self.internal_state
                 state_matrix[i - n_forget_points, self.n_internal_units:] = scaled_input
 
-#            if i % 1000 == 0:
-#                print i, len(input)
+            if i % 1000 == 0:
+                print i, len(input)
 
             if self.callback:
                 callback_state[i % self.callback_every,:] = np.hstack((scaled_input, self.internal_state, scaled_output))
@@ -234,6 +232,7 @@ class EchoStateNetwork(object):
 
     def point_to_index(self, x, y):
         return x % self.width + y * self.width
+
 
 class NeighbourESN(EchoStateNetwork):
 
@@ -377,3 +376,16 @@ def linear_regression(state_matrix, teacher_matrix):
     p_vec = state_matrix.T.dot(teacher_matrix / run_length)
     inv = np.array(np.linalg.inv(cov_mat), dtype='float32')
     return (inv.dot(p_vec)).T
+
+def ridge_regression(state_matrix, teacher_matrix, beta=1):
+    return teacher_matrix.T.dot(state_matrix).dot(
+        np.linalg.inv(state_matrix.T.dot(state_matrix) + beta))
+
+def logistic_regression(state_matrix, teacher_matrix):
+    for i in range(state_matrix.shape[1]):
+        clf = LogisticRegression(tol=0.05)
+        clf.fit(state_matrix, teacher_matrix[:, i])
+        self.output_weights[i, :] = clf.coef_
+        print i
+
+    

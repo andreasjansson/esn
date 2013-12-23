@@ -23,7 +23,7 @@ class Visualiser(wx.Frame):
 
         super(Visualiser, self).__init__(None, -1, 'esn', style=wx.DEFAULT_FRAME_STYLE ^ wx.RESIZE_BORDER)
         #self.SetDoubleBuffered(True)
-        self.SetSizeHints(1200, 800)
+        self.SetSizeHints(1500, 800)
 
         self.network = network
         self.input_neurons = {}
