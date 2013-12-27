@@ -31,6 +31,7 @@ import matplotlib.pyplot as plt
 import os
 import time
 import random
+from esn import postprocess
 
 DATA_DIR = os.path.expanduser('~/data/billboard')
 
@@ -89,7 +90,7 @@ def run(train_input, train_output, train_split_points, test_input, test_output, 
         input_scaling = [0.75] * 12 + [.05]
         input_shift = [-0.25] * 12 + [.2]
 
-    width = height = 20
+    width = height = 30
 
     network = esn.EchoStateNetwork(
         n_input_units=n_input_units,
@@ -135,8 +136,8 @@ def run(train_input, train_output, train_split_points, test_input, test_output, 
     return estimated_train_output, estimated_test_output, train_accuracy, test_accuracy
 
 def main():
-    n_train = 100
-    n_test = 50
+    n_train = 500
+    n_test = 30
     meta_data = read_meta_data()
     ids = meta_data.keys()
     random.shuffle(ids)
@@ -145,9 +146,22 @@ def main():
     train_input, train_output, train_split_points = read_data(ids[:n_train])
     test_input, test_output, test_split_points = read_data(ids[n_train:n_train + n_test])
 
+    sequences = postprocess.sequences_from_output(train_output, train_split_points)
+    model = postprocess.get_transition_model(sequences)
+
+    train_input, train_output, train_split_points = read_data(ids[:200])
+
     n_forget_points = 0
 
     estimated_train_output, estimated_test_output, train_accuracy, test_accuracy = run(train_input, train_output, train_split_points, test_input, test_output, test_split_points)
+
+    seq = postprocess.find_sequence(estimated_test_output, model, test_split_points)[1:]
+    model2 = np.eye(26) + .1
+    seq2 = postprocess.find_sequence(estimated_test_output, model2, test_split_points)[1:]
+    model3 = np.eye(26) + .01
+    seq3 = postprocess.find_sequence(estimated_test_output, model3, test_split_points)[1:]
+    estimated_test_seq = np.argmax(estimated_test_output, 1)[:-1]
+    test_seq = np.argmax(test_output, 1)[:-1]
 
     import ipdb; ipdb.set_trace()
 
@@ -156,7 +170,6 @@ def main():
     print '######## train accuracy: %f%%' % train_accuracy
     print '######## test accuracy: %f%%' % test_accuracy
 
-    from esn import postprocess
 
     import ipdb; ipdb.set_trace()
 
