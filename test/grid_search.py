@@ -26,7 +26,7 @@ def get_score(params):
         noise_level=0.001,
         spectral_radius=params['spectral_radius'],
         feedback_scaling=[0] * n_output_units,
-        leakage=params['leakage1'] * (width * height / 2) + params['leakage2'] * (width * height / 2),
+        leakage=np.array([params['leakage1']] * (width * height / 2) + [params['leakage2']] * (width * height / 2)),
         teacher_scaling=.99,
         output_activation_function='tanh'
     )
@@ -51,7 +51,7 @@ def main():
     global test_input, test_output, test_split_points, train_input, train_output, train_split_points
 
     # set OPENBLAS_NUM_THREADS before running!
-    n_grid_threads = 32
+    n_grid_threads = 16
 
     n_train = 100
     n_test = 50
