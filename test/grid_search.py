@@ -4,6 +4,7 @@ import itertools
 import multiprocessing
 import signal
 import simplejson as json
+import os
 
 import esn
 import chord_recognition
@@ -12,7 +13,7 @@ train_input = train_output = train_split_points = test_input = test_output = tes
 
 def get_score(params):
 
-    width = height = 30
+    width = height = 50
     n_input_units = 12
     n_output_units = len(chord_recognition.CHORD_MAP)
     network = esn.EchoStateNetwork(
@@ -39,6 +40,13 @@ def get_score(params):
 
     score = correct / float(len(test_output))
 
+    import uuid
+    filename = 'scores-%s-%s.json' % (score, str(uuid.uuid4()))
+
+    with open(filename, 'w') as f:
+        json.dump(params, f)
+    os.system('scp %s jansson.me.uk:~/scores/%s' % (filename, filename))
+
 #    print 'connectivity: %.2f' % params['connectivity']
 #    print 'input_scaling: %.2f' % params['input_scaling']
 #    print 'spectral_radius: %.2f' % params['spectral_radius']
@@ -63,10 +71,10 @@ def main():
 
     grid = {
         'connectivity': [.02, .05, .1],
-        'spectral_radius': [.9, 1.1, 1.3],
+        'spectral_radius': [.5, .8, 1.1, 1.3],
         'leakage1': [.05, .1, .2],
-        'leakage2': [.02, .4, .8],
-        'input_scaling': [.5, .75, 1],
+        'leakage2': [.02, .15, .4, .8],
+        'input_scaling': [.75],
     }
 
     items = sorted(grid.items())
