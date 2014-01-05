@@ -5,39 +5,25 @@ import itertools
 import glob
 import random
 
-from esn import NeighbourESN, EchoStateNetwork, OnlineNeighbourESN
+from esn import EchoStateNetwork
 
 SR = 6000
 
-def scholarpedia(sequence_length=20000, out_min_period=4, out_max_period=16):
+def scholarpedia(sequence_length=2000, out_min_period=4, out_max_period=16):
 
-    # esn = EchoStateNetwork(
-    #     n_input_units=2,
-    #     n_internal_units=200,
-    #     n_output_units=1,
-    #     connectivity=0.05,
-    #     input_scaling=[0.01, 3],
-    #     input_shift=[0, 0],
-    #     teacher_scaling=[1.4],
-    #     teacher_shift=[-0.7],
-    #     noise_level=0.001,
-    #     spectral_radius=0.25,
-    #     feedback_scaling=[0.8],
-    # )
-
-    esn = NeighbourESN(
+    esn = EchoStateNetwork(
         n_input_units=2,
         width=14,
         height=14,
         n_output_units=1,
-        input_scaling=[0.01, 1],
-        input_shift=[0, -.5],
+        connectivity=0.05,
+        input_scaling=[0.01, 3],
+        input_shift=[0, 0],
         teacher_scaling=[1.4],
         teacher_shift=[-0.7],
         noise_level=0.001,
-        spectral_radius=.25,
-        feedback_scaling=[0.9],
-        output_activation_function='identity',
+        spectral_radius=0.25,
+        feedback_scaling=[0.8],
     )
 
     out_period_setting = np.zeros((sequence_length, 1))

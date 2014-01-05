@@ -90,7 +90,7 @@ def run(train_input, train_output, train_split_points, test_input, test_output, 
         input_scaling = [0.75] * 12 + [.05]
         input_shift = [-0.25] * 12 + [.2]
 
-    width = height = 30
+    width = height = 20
 
     network = esn.EchoStateNetwork(
         n_input_units=n_input_units,
@@ -136,7 +136,7 @@ def run(train_input, train_output, train_split_points, test_input, test_output, 
     return estimated_train_output, estimated_test_output, train_accuracy, test_accuracy
 
 def main():
-    n_train = 500
+    n_train = 50
     n_test = 30
     meta_data = read_meta_data()
     ids = meta_data.keys()
