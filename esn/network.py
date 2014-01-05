@@ -88,14 +88,14 @@ class EchoStateNetwork(object):
         assert input.shape[1] == self.n_input_units
         assert output.shape[1] == self.n_output_units
 
-        state_matrix = self._compute_state_matrix(input, output, n_forget_points, reset_points=reset_points)
+        state_matrix = self.compute_state_matrix(input, output, n_forget_points, reset_points=reset_points)
         teacher_matrix = self._compute_teacher_matrix(output, n_forget_points)
         self.output_weights = ridge_regression(state_matrix, teacher_matrix)
 
         return state_matrix
 
     def test(self, input, n_forget_points=0, reset_points=None, actual_output=None):
-        state_matrix = self._compute_state_matrix(input, n_forget_points=n_forget_points,
+        state_matrix = self.compute_state_matrix(input, n_forget_points=n_forget_points,
                                                   reset_points=reset_points, actual_output=actual_output)
         output = np.dot(state_matrix, self.output_weights.T)
         output = self.output_activation_function(output)
@@ -106,7 +106,7 @@ class EchoStateNetwork(object):
 
         return output
 
-    def _compute_state_matrix(self, input, output=None, n_forget_points=0,
+    def compute_state_matrix(self, input, output=None, n_forget_points=0,
                               reset_points=None, actual_output=None):
         state_matrix = np.zeros((len(input) - n_forget_points,
                                   self.n_input_units + self.n_internal_units), dtype='float32')
@@ -149,8 +149,8 @@ class EchoStateNetwork(object):
                 state_matrix[i - n_forget_points, :self.n_internal_units] = self.internal_state
                 state_matrix[i - n_forget_points, self.n_internal_units:] = scaled_input
 
-            if i % 1000 == 0:
-                print i, len(input)
+#            if i % 1000 == 0:
+#                print i, len(input)
 
             if self.callback:
                 callback_state[i % self.callback_every,:] = np.hstack((scaled_input, self.internal_state, scaled_output))

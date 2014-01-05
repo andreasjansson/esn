@@ -4,16 +4,17 @@ import random
 import chord_recognition
 import esn
 
-n_train = 20
+n_train = 6
 n_test = 3
 meta_data = chord_recognition.read_meta_data()
 ids = meta_data.keys()
 random.shuffle(ids)
 train_ids = ids[:n_train]
 test_ids = ids[n_train:n_train + n_test]
-inputs, outputs, split_points = chord_recognition.read_data(ids[:n_train])
+train_inputs, train_outputs, split_train_points = chord_recognition.read_data(ids[:n_train])
+test_inputs, test_outputs, test_split_points = chord_recognition.read_data(ids[n_train:n_train + n_test])
 
-n_input_units = inputs.shape[1]
+n_input_units = train_inputs.shape[1]
 n_output_units = len(chord_recognition.CHORD_MAP)
 
 input_scaling = [0.75] * 12
@@ -38,7 +39,13 @@ network = esn.EchoStateNetwork(
     output_activation_function='tanh'
 )
 
-state_matrix = network.train(inputs, outputs)
+state_matrix = network.compute_state_matrix(train_inputs, train_outputs)
 
-nn = esn.FeedForwardNetwork(state_matrix, outputs)
-nn.train()
+import ipdb; ipdb.set_trace()
+nn = esn.FeedForwardNetwork(train_inputs.shape[0], train_outputs.shape[0])
+nn.train(state_matrix, train_outputs)
+
+state_matrix2 = network.compute_state_matrix(test_inputs, test_outputs)
+output_state = nn.test(state_matrix2, test_outputs)
+
+import ipdb; ipdb.set_trace()

@@ -4,19 +4,17 @@ TINY = np.exp(-30)
 
 class FeedForwardNetwork(object):
 
-    def __init__(self, inputs, outputs, n_hidden=50, learning_rate=0.1,
+    def __init__(self, n_inputs, n_outputs, n_hidden=50, learning_rate=0.1,
                  initial_weight_stddev=0.01, momentum=0.9, batch_size=100):
 
-        self.inputs = inputs
-        self.outputs = outputs
-        self.length, self.n_inputs = inputs.shape
+#        momentum = 0
+
+        self.n_inputs = n_inputs
+        self.n_outputs = n_outputs
         self.n_hidden = n_hidden
-        self.n_outputs = outputs.shape[1]
-        assert outputs.shape[0] == self.length
         self.learning_rate = learning_rate
         self.momentum = momentum
         self.batch_size = batch_size
-        self.input_batches, self.n_batches = self.split_batches(inputs)
 
         self.input_to_hidden_weights = np.random.randn(
             self.n_inputs, self.n_hidden) * initial_weight_stddev
@@ -30,12 +28,18 @@ class FeedForwardNetwork(object):
         self.hidden_bias_delta = np.zeros(self.n_hidden)
         self.output_bias_delta = np.zeros(self.n_outputs)
     
-    def train(self, epochs=100):
+    def test(self, inputs, outputs):
+        _, output_state = self.fprop(inputs)
+        return output_state
+
+    def train(self, inputs, outputs, epochs=20):
+        input_batches = self.split_batches(inputs)
+
         for epoch in range(epochs):
             total_cross_entropy = 0
             correct = 0
-            for i, input_batch in enumerate(self.input_batches):
-                output_batch = self.outputs[i * self.batch_size:(i + 1) * self.batch_size, :].T
+            for i, input_batch in enumerate(input_batches):
+                output_batch = outputs[i * self.batch_size:(i + 1) * self.batch_size, :].T
                 hidden_state, output_state = self.fprop(input_batch)
 
                 cross_entropy = -np.sum(
@@ -68,7 +72,7 @@ class FeedForwardNetwork(object):
                 self.output_bias -= self.learning_rate * self.output_bias_delta
 
             print 'Epoch: %d, cross entropy: %.3f, correct: %.3f' % (
-                epoch, total_cross_entropy, correct / float(self.length))
+                epoch, total_cross_entropy, correct / float(inputs.shape[0]))
 
     def fprop(self, input_batch):
         # TODO: nicer way to add "horizonally"?
@@ -89,4 +93,4 @@ class FeedForwardNetwork(object):
         input_batches = []
         for i in range(n_batches):
             input_batches.append(inputs[i * self.batch_size:(i + 1) * self.batch_size, :])
-        return input_batches, n_batches
+        return input_batches
