@@ -41,8 +41,7 @@ network = esn.EchoStateNetwork(
 
 state_matrix = network.compute_state_matrix(train_inputs, train_outputs)
 
-import ipdb; ipdb.set_trace()
-nn = esn.FeedForwardNetwork(train_inputs.shape[0], train_outputs.shape[0])
+nn = esn.FeedForwardNetwork(state_matrix.shape[1], train_outputs.shape[1])
 nn.train(state_matrix, train_outputs)
 
 state_matrix2 = network.compute_state_matrix(test_inputs, test_outputs)
