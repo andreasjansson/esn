@@ -32,7 +32,7 @@ class FeedForwardNetwork(object):
         _, output_state = self.fprop(inputs)
         return output_state
 
-    def train(self, inputs, outputs, epochs=20):
+    def train(self, inputs, outputs, epochs=50, test_input=None, test_output=None):
         input_batches = self.split_batches(inputs)
 
         for epoch in range(epochs):
@@ -71,8 +71,13 @@ class FeedForwardNetwork(object):
                 self.output_bias_delta += output_bias_gradient / self.batch_size
                 self.output_bias -= self.learning_rate * self.output_bias_delta
 
-            print 'Epoch: %d, cross entropy: %.3f, correct: %.3f' % (
+            debug_msg = 'Epoch: %d, cross entropy: %.3f, train correct: %.3f' % (
                 epoch, total_cross_entropy, correct / float(inputs.shape[0]))
+            if test_input is not None and test_output is not None:
+                test_correct = np.sum(
+                    np.argmax(self.test(test_input, test_output), 0) == np.argmax(test_output, 1))
+                debug_msg += ', test correct: %.3f' % (test_correct / float(inputs.shape[0]))
+            print debug_msg
 
     def fprop(self, input_batch):
         # TODO: nicer way to add "horizonally"?
