@@ -6,7 +6,8 @@ plt.ion()
 
 class SelfOrganisingReservoir(BaseEstimator):
 
-    def __init__(self, n_inputs, n_outputs,
+    def __init__(self,
+                 n_inputs, n_outputs,
                  width, height,
                  input_scaling=30, internal_scaling=2,
                  leakage=.5,
@@ -17,10 +18,10 @@ class SelfOrganisingReservoir(BaseEstimator):
         self.n_outputs = n_outputs
         self.width = width
         self.height = height
-        self.input_scaling = input_scaling
-        self.internal_scaling = internal_scaling
-        self.leakage = leakage
         self.n_internal = width * height
+        self.input_scaling = input_scaling / float(n_inputs)
+        self.internal_scaling = internal_scaling / float(self.n_internal)
+        self.leakage = leakage
         self.learning_rate_start = learning_rate_start
         self.learning_rate_end = learning_rate_end
         self.neighbourhood_width_start = neighbourhood_width_start
@@ -42,6 +43,9 @@ class SelfOrganisingReservoir(BaseEstimator):
                 inputs, learning_rates, neighbourhood_widths)):
             x = x[np.newaxis].T
 
+            if i % 1000 == 0:
+                print 'pretrain %d/%d' % (i, len(inputs))
+
             if split_points is not None and i in split_points:
                 activations = np.zeros((self.n_internal, 1))
 
@@ -56,11 +60,24 @@ class SelfOrganisingReservoir(BaseEstimator):
             #print np.round(self.internal_weights.ravel(), 3)
         
     def fit(self, inputs, outputs, split_points=None):
+        history = self.get_activation_history(inputs, split_points)
+        self.output_weights = self.linear_regression(history, outputs)
+        return self
+
+    def predict(self, inputs, split_points=None):
+        history = self.get_activation_history(inputs, split_points)
+        outputs = history.dot(self.output_weights)
+        return outputs
+
+    def get_activation_history(self, inputs, split_points=None):
         activations = np.zeros((self.n_internal, 1))
         history = np.zeros((len(inputs), self.n_internal))
 
         for i, x in enumerate(inputs):
             x = x[np.newaxis].T
+
+            if i % 1000 == 0:
+                print '%d/%d' % (i, len(inputs))
 
             if split_points is not None and i in split_points:
                 activations = np.zeros((self.n_internal, 1))
@@ -68,30 +85,9 @@ class SelfOrganisingReservoir(BaseEstimator):
             activations = self.update_activations(x, activations)
             history[i, :] = activations.T
 
-        self.output_weights = self.linear_regression(history, outputs)
-
-        return self
-
-    def predict(self, inputs, split_points=None):
-        activations = np.zeros((self.n_internal, 1))
-        outputs = np.zeros((len(inputs), self.n_outputs))
-
-        for i, x in enumerate(inputs):
-            x = x[np.newaxis].T
-
-            if split_points is not None and i in split_points:
-                activations = np.zeros((self.n_internal, 1))
-
-            activations = self.update_activations(x, activations)
-
-            output = activations.T.dot(self.output_weights)
-            outputs[i, :] = output
-
-        return outputs
+        return history
 
     def linear_regression(self, history, outputs, beta=0):
-        #return np.linalg.pinv(history).dot(outputs)
-
         return outputs.T.dot(history).dot(np.linalg.inv(history.T.dot(history) + beta)).T
 
     def update_weights(self, target, values, learning_rate, neighbourhood_width):
@@ -102,14 +98,10 @@ class SelfOrganisingReservoir(BaseEstimator):
         dist_x = np.abs(np.arange(-x, self.width - x))
         dist_y = np.abs(np.arange(-y, self.height - y))
         distances = (dist_x + dist_y[np.newaxis].T).ravel()
-        #distances = np.abs(best_unit - np.arange(self.n_internal))
 
         distribution = np.exp(- (distances ** 2) / (neighbourhood_width ** 2))
 
-        for i, v in enumerate(values.T):
-            values[:, i] += (learning_rate * distribution[i] * (target.T - v)).ravel()
-
-        #values += (learning_rate * distribution)[np.newaxis].dot((target - values).T)
+        values += learning_rate * distribution * (target - values)
 
     def update_activations(self, x, activations):
         input_diff = np.linalg.norm(self.input_weights - x, axis=0) ** 2
@@ -127,3 +119,53 @@ class SelfOrganisingReservoir(BaseEstimator):
         
     def initial_internal_weights(self):
         return np.eye(self.n_internal)
+
+
+class DeepSelfOrganisingReservoir(BaseEstimator):
+
+    def __init__(self,
+                 n_inputs, n_outputs,
+                 sizes,
+                 input_scaling=30, internal_scaling=2,
+                 leakage=.5,
+                 learning_rate_start=0.04, learning_rate_end=0.01,
+                 neighbourhood_width_start=2, neighbourhood_width_end=0.001):
+
+        self.n_inputs = n_inputs
+        self.n_outputs = n_outputs
+        self.sizes = sizes
+
+        self.layers = []
+        for i, size in enumerate(sizes):
+            self.layers.append(SelfOrganisingReservoir(
+                n_inputs=n_inputs if i == 0 else sizes[i - 1][0] * sizes[i - 1][1],
+                n_outputs=n_outputs if i == len(sizes) - 1 else sizes[i + 1][0] * sizes[i + 1][1],
+                width=size[0],
+                height=size[1],
+                input_scaling=input_scaling,
+                internal_scaling=internal_scaling,
+                leakage=leakage,
+                learning_rate_start=learning_rate_start,
+                learning_rate_end=learning_rate_end,
+                neighbourhood_width_start=neighbourhood_width_start,
+                neighbourhood_width_end=neighbourhood_width_end,
+            ))
+
+    def pretrain(self, inputs, split_points=None):
+        for layer in self.layers:
+            layer.pretrain(inputs, split_points)
+            inputs = layer.get_activation_history(inputs, split_points)
+
+    def fit(self, inputs, outputs, split_points=None):
+        for i, layer in enumerate(self.layers):
+            if i < len(self.layers) - 1:
+                inputs = layer.get_activation_history(inputs, split_points)
+            else:
+                layer.fit(inputs, outputs, split_points)
+
+    def predict(self, inputs, split_points=None):
+        for i, layer in enumerate(self.layers):
+            if i < len(self.layers) - 1:
+                inputs = layer.get_activation_history(inputs, split_points)
+            else:
+                return layer.predict(inputs, split_points)
