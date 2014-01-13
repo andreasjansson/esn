@@ -31,6 +31,7 @@ import matplotlib.pyplot as plt
 import os
 import time
 import random
+import operator
 from esn import postprocess
 
 DATA_DIR = os.path.expanduser('~/data/billboard')
@@ -75,10 +76,54 @@ CHORD_MAP = {
     'X': 25,
 }
 
+NOTE_NAMES = {
+    'C':  0,
+    'C#': 1,
+    'D':  2,
+    'D#': 3,
+    'E':  4,
+    'F':  5,
+    'F#': 6,
+    'G':  7,
+    'G#': 8,
+    'A':  9,
+    'A#': 10,
+    'B':  11,
+}
+
+def get_chord_notes():
+    chord_notes = {}
+    for chord_name in CHORD_MAP:
+        if ':' not in chord_name:
+            continue
+        root, mode = chord_name.split(':')
+        if mode == 'maj':
+            notes = np.array([0, 4, 7])
+        elif mode == 'min':
+            notes = np.array([0, 3, 7])
+        notes = frozenset((notes + NOTE_NAMES[root]) % 12)
+        chord_notes[chord_name] = notes
+    chord_notes['N'] = frozenset([])
+    chord_notes['X'] = frozenset([])
+    return chord_notes
+CHORD_NOTES = get_chord_notes()
+
+def get_chord_probs(note_vector):
+    probs = []
+    for name, notes in CHORD_NOTES.items():
+        if name in ['N', 'X']:
+            continue
+        p = 1
+        for note in notes:
+            p *= note_vector[note]
+        probs.append((name, p))
+    probs = sorted(probs, key=operator.itemgetter(1), reverse=True)
+    return probs
+
 def run(train_input, train_output, train_split_points, test_input, test_output, test_split_points):
 
     n_input_units = train_input.shape[1]
-    n_output_units = len(CHORD_MAP)
+    n_output_units = train_input.shape[1]
 
     if n_input_units == 24:
         input_scaling = [0.75] * 12 + [.01] * 12
@@ -90,7 +135,7 @@ def run(train_input, train_output, train_split_points, test_input, test_output, 
         input_scaling = [0.75] * 12 + [.05]
         input_shift = [-0.25] * 12 + [.2]
 
-    width = height = 20
+    width = height = 10
 
     network = esn.EchoStateNetwork(
         n_input_units=n_input_units,
@@ -106,11 +151,13 @@ def run(train_input, train_output, train_split_points, test_input, test_output, 
         feedback_scaling=[0] * n_output_units,
         leakage=np.array([.2] * (width * height * 2/4) + [.5] * (width * height * 2/4)),
         teacher_scaling=.99,
-        output_activation_function='tanh'
+        output_activation_function='identity'
     )
 
-    if hasattr(esn, 'Visualiser'):
-        del esn.Visualiser
+    import ipdb; ipdb.set_trace()
+
+#    if hasattr(esn, 'Visualiser'):
+#        del esn.Visualiser
     if hasattr(esn, 'Visualiser'):
         visualiser = esn.Visualiser(network, 1000, input_yscale=.5, internal_yscale=.5, output_yscale=.5)
 
@@ -136,8 +183,8 @@ def run(train_input, train_output, train_split_points, test_input, test_output, 
     return estimated_train_output, estimated_test_output, train_accuracy, test_accuracy
 
 def main():
-    n_train = 50
-    n_test = 30
+    n_train = 20
+    n_test = 10
     meta_data = read_meta_data()
     ids = meta_data.keys()
     random.shuffle(ids)
@@ -258,8 +305,13 @@ def normalise_chord(chord):
         if root in ENHARMONIC_EQUIVALENTS:
             root = ENHARMONIC_EQUIVALENTS[root]
             chord = '%s:%s' % (root, mode)
-    vector = np.zeros(len(CHORD_MAP))
-    vector[CHORD_MAP[chord]] = 1
+            
+    #vector = np.zeros(len(CHORD_MAP))
+    #vector[CHORD_MAP[chord]] = 1
+    vector = np.zeros(12)
+    for i in CHORD_NOTES[chord]:
+        vector[i] = 1
+
     return vector
 
 def combine_chromas_and_chords(timed_chromas, timed_chords):

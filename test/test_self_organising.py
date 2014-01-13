@@ -3,6 +3,7 @@ import scipy.sparse
 import random
 
 from esn import selforganising
+import chord_recognition
 
 import matplotlib.pyplot as plt
 plt.ion()
@@ -36,11 +37,9 @@ def test_data(sequence_length=2000, min_freq=20, max_freq=100, sr=1000):
     return audio, outputs, audio, outputs, audio, outputs
 
 def chord_data():
-    import chord_recognition
-
-    n_pretrain = 300
-    n_train = 300
-    n_test = 150
+    n_pretrain = 100
+    n_train = 100
+    n_test = 30
 
     meta_data = chord_recognition.read_meta_data()
     ids = meta_data.keys()
@@ -53,12 +52,12 @@ def chord_data():
 
 pretrain_inputs, pretrain_outputs, train_inputs, train_outputs, test_inputs, test_outputs = chord_data()
 #pretrain_inputs, pretrain_outputs, train_inputs, train_outputs, test_inputs, test_outputs = test_data()
-#test_inputs, test_outputs = train_inputs, train_outputs
+test_inputs, test_outputs = train_inputs, train_outputs
 
 n_inputs = train_inputs.shape[1]
 n_outputs = train_outputs.shape[1]
-width = 30
-height = 20
+width = 50
+height = 3
 n_internal = width * height
 
 network = selforganising.DeepSelfOrganisingReservoir(
@@ -112,10 +111,19 @@ network.pretrain(pretrain_inputs)
 network.fit(train_inputs, train_outputs)
 predicted = network.predict(test_inputs)
 
-plt.imshow(network.layers[-1].internal_weights, interpolation='none')
-
-truth = np.argmax(test_outputs, 1)
-correct = np.sum(np.argmax(predicted, 1) == truth)
-correct2 = np.sum(np.argmax(predicted2, 1) == truth)
+import operator
+for p, a in zip(predicted, test_outputs)[:1000]:
+    p_probs = chord_recognition.get_chord_probs(p)
+    a_probs = chord_recognition.get_chord_probs(a)
+    print '%s %s %s' % (a_probs[0][0], '==' if a_probs[0][0] == p_probs[0][0] else '!=', [(x, round(y, 2)) for x, y in sorted(p_probs[:3], key=operator.itemgetter(1), reverse=True)])
 
 import ipdb; ipdb.set_trace()
+
+in3top = sum([(chord_recognition.get_chord_probs(test_outputs[i])[0][0] in dict(chord_recognition.get_chord_probs(predicted[i])[:3])) for i in range(len(predicted))])
+correct = sum([(chord_recognition.get_chord_probs(test_outputs[i])[0][0] in dict(chord_recognition.get_chord_probs(predicted[i])[:1])) for i in range(len(predicted))])
+
+in3top2 = sum([(chord_recognition.get_chord_probs(test_outputs[i])[0][0] in dict(chord_recognition.get_chord_probs(predicted2[i])[:3])) for i in range(len(predicted))])
+correct2 = sum([(chord_recognition.get_chord_probs(test_outputs[i])[0][0] in dict(chord_recognition.get_chord_probs(predicted2[i])[:1])) for i in range(len(predicted))])
+
+plt.imshow(network.layers[-1].internal_weights, interpolation='none')
+
