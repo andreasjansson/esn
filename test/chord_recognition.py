@@ -244,19 +244,49 @@ def read_meta_data():
                 meta_data[id] = (artist, title)
     return meta_data
 
-def read_data(ids):
+def chord_data(n_pretrain, n_train, n_test, return_notes=False):
+    meta_data = read_meta_data()
+    ids = meta_data.keys()
+    random.shuffle(ids)
+
+    import ipdb; ipdb.set_trace()
+
+    pretrain_inputs, pretrain_outputs, pretrain_split_points = read_data(ids[:n_pretrain], return_notes=return_notes)
+    train_inputs, train_outputs, train_split_points = read_data(ids[n_pretrain:n_pretrain + n_train], return_notes=return_notes)
+    test_inputs, test_outputs, test_split_points = read_data(ids[n_pretrain + n_train:n_pretrain + n_train + n_test], return_notes=return_notes)
+
+    return pretrain_inputs, pretrain_outputs, pretrain_split_points, train_inputs, train_outputs, train_split_points, test_inputs, test_outputs, test_split_points
+
+def read_data(ids, with_timbre=False, return_notes=False):
     all_chromas = []
     all_chords = []
     split_points = []
     for id in ids:
-        timed_chromas = parse_chroma_file('%s/McGill-Billboard/%04d/echonest.json' % (DATA_DIR, id))
-        timed_chords = parse_chords_file('%s/McGill-Billboard/%04d/majmin.lab' % (DATA_DIR, id))
+        timed_chromas = parse_chroma_file('%s/McGill-Billboard/%04d/echonest.json' % (DATA_DIR, id), with_timbre=with_timbre)
+        timed_chords = parse_chords_file('%s/McGill-Billboard/%04d/majmin.lab' % (DATA_DIR, id), return_notes=return_notes)
         chromas, chords = combine_chromas_and_chords(timed_chromas, timed_chords)
         all_chromas += chromas
         all_chords += chords
         split_points.append(len(all_chromas))
 
     return np.array(all_chromas), np.array(all_chords), split_points
+
+def transpose(chromas, chords, steps):
+    transposed_chromas = []
+    for chroma in chromas:
+        transposed_chromas.append(np.roll(chroma, steps).tolist())
+    transposed_chords = []
+    inverse_chord_map = {v: k for k, v in CHORD_MAP.items()}
+    inverse_note_names = {v: k for k, v in NOTE_NAMES.items()}
+    for chord in chords:
+        name = chord
+        if ':' in name:
+            root, mode = name.split(':')
+            number = NOTE_NAMES[root]
+            number = (number + steps) % 12
+            name = '%s:%s' % (inverse_note_names[number], mode)
+        transposed_chords.append(name)
+    return transposed_chromas, transposed_chords
 
 def parse_chroma_file(filename, with_timbre=False, with_loudness=False):
     timed_chromas = []
@@ -270,14 +300,13 @@ def parse_chroma_file(filename, with_timbre=False, with_loudness=False):
             chroma = segment['pitches']
 
             if with_timbre:
-                timbre = segment['timbre']
+                timbre = [t / 200. + .5 for t in segment['timbre']]
                 chroma += timbre
 
-            if with_loudness or 1:
+            if with_loudness:
                 loudness = segment['loudness_max']
                 loudness = (loudness + 60) / 60.0
                 chroma = [c * loudness for c in chroma]
-#                chroma += [loudness]
 
             timed_chromas.append((float(start), chroma))
     return timed_chromas
@@ -288,29 +317,31 @@ def get_zweiklangs(chroma):
     chroma[peaks] = 1
     return chroma
 
-def parse_chords_file(filename):
+def parse_chords_file(filename, return_notes=False):
     timed_chords = []
     with open(filename) as f:
         for line in f.readlines():
             line = line.strip()
             if line:
                 start, end, chord = line.split('\t')
-                chord_vector = normalise_chord(chord)
+                chord_vector = normalise_chord(chord, return_notes=return_notes)
                 timed_chords.append((float(start), chord_vector))
     return timed_chords
 
-def normalise_chord(chord):
+def normalise_chord(chord, return_notes=False):
     if ':' in chord:
         root, mode = chord.split(':')
         if root in ENHARMONIC_EQUIVALENTS:
             root = ENHARMONIC_EQUIVALENTS[root]
             chord = '%s:%s' % (root, mode)
             
-    #vector = np.zeros(len(CHORD_MAP))
-    #vector[CHORD_MAP[chord]] = 1
-    vector = np.zeros(12)
-    for i in CHORD_NOTES[chord]:
-        vector[i] = 1
+    if return_notes:
+        vector = np.zeros(12)
+        for i in CHORD_NOTES[chord]:
+            vector[i] = 1
+    else:
+        vector = np.zeros(len(CHORD_MAP))
+        vector[CHORD_MAP[chord]] = 1
 
     return vector
 

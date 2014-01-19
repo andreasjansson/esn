@@ -2,7 +2,10 @@ import numpy as np
 import scipy.sparse
 import random
 
-from esn import selforganising
+random.seed(1)
+np.random.seed(1)
+
+from esn import selforganising, som2
 import chord_recognition
 
 import matplotlib.pyplot as plt
@@ -37,27 +40,48 @@ def test_data(sequence_length=2000, min_freq=20, max_freq=100, sr=1000):
     return audio, outputs, audio, outputs, audio, outputs
 
 def chord_data():
-    n_pretrain = 100
-    n_train = 100
-    n_test = 30
+    n_pretrain = 10
+    n_train = 10
+    n_test = 10
 
     meta_data = chord_recognition.read_meta_data()
     ids = meta_data.keys()
     random.shuffle(ids)
-    pretrain_input, pretrain_output, pretrain_split_points = chord_recognition.read_data(ids[:n_pretrain])
-    train_input, train_output, train_split_points = chord_recognition.read_data(ids[n_pretrain:n_pretrain + n_train])
-    test_input, test_output, test_split_points = chord_recognition.read_data(ids[n_pretrain + n_train:n_pretrain + n_train + n_test])
+    pretrain_inputs, pretrain_outputs, pretrain_split_points = chord_recognition.read_data(ids[:n_pretrain])
+    train_inputs, train_outputs, train_split_points = chord_recognition.read_data(ids[n_pretrain:n_pretrain + n_train])
+    test_inputs, test_outputs, test_split_points = chord_recognition.read_data(ids[n_pretrain + n_train:n_pretrain + n_train + n_test])
 
-    return pretrain_input, pretrain_output, train_input, train_output, test_input, test_output
+    return pretrain_inputs, pretrain_outputs, pretrain_split_points, train_inputs, train_outputs, train_split_points, test_inputs, test_outputs, test_split_points
 
-pretrain_inputs, pretrain_outputs, train_inputs, train_outputs, test_inputs, test_outputs = chord_data()
-#pretrain_inputs, pretrain_outputs, train_inputs, train_outputs, test_inputs, test_outputs = test_data()
-test_inputs, test_outputs = train_inputs, train_outputs
+pretrain_inputs, pretrain_outputs, pretrain_split_points, train_inputs, train_outputs, train_split_points, test_inputs, test_outputs, test_split_points = chord_data()
+#test_inputs, test_outputs = train_inputs, train_outputs
 
 n_inputs = train_inputs.shape[1]
 n_outputs = train_outputs.shape[1]
-width = 50
-height = 3
+
+
+# ideas: connect all adjacent nodes and treat as echo state network
+# 
+#        2-dimensional grid, where column is time, self-organise
+#        x[t-n], [...], x[t] over columns (with wrap-around). potentially
+#        m times slower, where m is the number of columns. m may be > n.
+#        alternatively, m = n and no wrap around (much faster). this is
+#        effectively the same as having [x[t-n] ; [...] ; x[t]] as inputs.
+#        we could have [(x[t-n] + [...] + x[t-1])/(n - 1) ; x[t]] as inputs
+#        for improved speed (and perhaps generalisation).
+#
+#        automatically connect current and previous best matching unit
+#        during pretraining (even if itself).
+
+network = som2.SOM2(n_inputs, width=20, height=20, neighbourhood_width_start=3, neighbourhood_width_end=1, learning_rate_start=0.04, learning_rate_end=0.01)
+network.pretrain(pretrain_inputs, pretrain_split_points)
+network.fit(train_inputs, train_outputs, train_split_points)
+predicted = network.predict(test_inputs, test_split_points)
+
+import ipdb; ipdb.set_trace()
+
+width = 100
+height = 1
 n_internal = width * height
 
 network = selforganising.DeepSelfOrganisingReservoir(
@@ -67,49 +91,23 @@ network = selforganising.DeepSelfOrganisingReservoir(
     sizes=[(width, height)],
     input_scaling=100,
     internal_scaling=50,
-    leakage=.2,
+    leakage=.5,
     learning_rate_start=.05,
-    neighbourhood_width_start=2,
+    neighbourhood_width_start=10,
 )
 
-
-def _generate_internal_weights(connectivity=.1):
-    internal_weights = scipy.sparse.rand(
-        n_internal, n_internal, connectivity).tocsr()
-    return _normalise_internal_weights(internal_weights)
-
-def _normalise_internal_weights(internal_weights, spectral_radius=.8):
-    internal_weights.data -= .5
-    attempts = 5
-    for i in range(attempts):
-        try:
-            eigvals = scipy.sparse.linalg.eigs(
-                internal_weights, k=1, which='LM',
-                return_eigenvectors=False, tol=.02, maxiter=5000)
-            break
-        except (scipy.sparse.linalg.ArpackNoConvergence,
-                scipy.sparse.linalg.ArpackError):
-            continue
-    else:
-        print 'scipy.sparse.linalg failed to converge, falling back to numpy.linalg'
-        eigvals = np.linalg.eigvals(internal_weights.todense())
-    radius = np.abs(np.max(eigvals))
-    internal_weights /= radius
-    internal_weights *= spectral_radius
-    return np.array(internal_weights.todense())
 
 first_layer = network.layers[0]
 
 for layer in network.layers:
-    layer.internal_weights = _generate_internal_weights()
     layer.input_weights = 2 * np.random.rand(layer.n_inputs, layer.n_internal) - 1
 
-first_layer.fit(train_inputs, train_outputs)
-predicted2 = first_layer.predict(test_inputs)
+first_layer.fit(train_inputs, train_outputs, train_split_points)
+predicted2 = first_layer.predict(test_inputs, test_split_points)
 
-network.pretrain(pretrain_inputs)
-network.fit(train_inputs, train_outputs)
-predicted = network.predict(test_inputs)
+network.pretrain(pretrain_inputs, pretrain_split_points)
+network.fit(train_inputs, train_outputs, train_split_points)
+predicted = network.predict(test_inputs, test_split_points)
 
 import operator
 for p, a in zip(predicted, test_outputs)[:1000]:
@@ -117,7 +115,7 @@ for p, a in zip(predicted, test_outputs)[:1000]:
     a_probs = chord_recognition.get_chord_probs(a)
     print '%s %s %s' % (a_probs[0][0], '==' if a_probs[0][0] == p_probs[0][0] else '!=', [(x, round(y, 2)) for x, y in sorted(p_probs[:3], key=operator.itemgetter(1), reverse=True)])
 
-import ipdb; ipdb.set_trace()
+plt.imshow(network.layers[-1].internal_weights, interpolation='none')
 
 in3top = sum([(chord_recognition.get_chord_probs(test_outputs[i])[0][0] in dict(chord_recognition.get_chord_probs(predicted[i])[:3])) for i in range(len(predicted))])
 correct = sum([(chord_recognition.get_chord_probs(test_outputs[i])[0][0] in dict(chord_recognition.get_chord_probs(predicted[i])[:1])) for i in range(len(predicted))])
@@ -125,5 +123,4 @@ correct = sum([(chord_recognition.get_chord_probs(test_outputs[i])[0][0] in dict
 in3top2 = sum([(chord_recognition.get_chord_probs(test_outputs[i])[0][0] in dict(chord_recognition.get_chord_probs(predicted2[i])[:3])) for i in range(len(predicted))])
 correct2 = sum([(chord_recognition.get_chord_probs(test_outputs[i])[0][0] in dict(chord_recognition.get_chord_probs(predicted2[i])[:1])) for i in range(len(predicted))])
 
-plt.imshow(network.layers[-1].internal_weights, interpolation='none')
-
+import ipdb; ipdb.set_trace()

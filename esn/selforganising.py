@@ -1,5 +1,6 @@
 import numpy as np
-from sklearn.base import BaseEstimator, ClassifierMixin
+import scipy.sparse
+from sklearn.base import BaseEstimator
 
 import matplotlib.pyplot as plt
 plt.ion()
@@ -9,6 +10,8 @@ class SelfOrganisingReservoir(BaseEstimator):
     def __init__(self,
                  n_inputs, n_outputs,
                  width, height,
+                 connectivity=0.05,
+                 initial_spectral_radius=0.8,
                  input_scaling=30, internal_scaling=2,
                  leakage=.5,
                  learning_rate_start=0.04, learning_rate_end=0.01,
@@ -18,6 +21,8 @@ class SelfOrganisingReservoir(BaseEstimator):
         self.n_outputs = n_outputs
         self.width = width
         self.height = height
+        self.connectivity = connectivity
+        self.initial_spectral_radius = initial_spectral_radius
         self.n_internal = width * height
         self.input_scaling = input_scaling / float(n_inputs)
         self.internal_scaling = internal_scaling / float(self.n_internal)
@@ -30,6 +35,31 @@ class SelfOrganisingReservoir(BaseEstimator):
         self.input_weights = self.initial_input_weights()
         self.internal_weights = self.initial_internal_weights()
         self.output_weights = None
+
+    def initial_internal_weights(self):
+        internal_weights = scipy.sparse.rand(
+            self.n_internal, self.n_internal, self.connectivity).tocsr()
+        return self.normalise_internal_weights(internal_weights)
+
+    def normalise_internal_weights(self, internal_weights):
+        internal_weights.data -= .5
+        attempts = 5
+        for _ in range(attempts):
+            try:
+                eigvals = scipy.sparse.linalg.eigs(
+                    internal_weights, k=1, which='LM',
+                    return_eigenvectors=False, tol=.02, maxiter=5000)
+                break
+            except (scipy.sparse.linalg.ArpackNoConvergence,
+                    scipy.sparse.linalg.ArpackError):
+                continue
+        else:
+            print 'scipy.sparse.linalg failed to converge, falling back to numpy.linalg'
+            eigvals = np.linalg.eigvals(internal_weights.todense())
+        radius = np.abs(np.max(eigvals))
+        internal_weights /= radius
+        internal_weights *= self.initial_spectral_radius
+        return np.array(internal_weights.todense())
 
     def pretrain(self, inputs, split_points=None):
         learning_rates = np.linspace(
@@ -90,7 +120,15 @@ class SelfOrganisingReservoir(BaseEstimator):
     def linear_regression(self, history, outputs, beta=0):
         return outputs.T.dot(history).dot(np.linalg.inv(history.T.dot(history) + beta)).T
 
+    def update_weights_NEW(self, target, values, learning_rate, neighbourhood_width):
+        distances = np.argsort(np.argsort(np.linalg.norm(values - target, axis=0)))
+        distribution = np.exp(- (distances ** 2) / (neighbourhood_width ** 2))
+        values += learning_rate * distribution * (target - values)
+
     def update_weights(self, target, values, learning_rate, neighbourhood_width):
+
+        ones = values != 0
+
         best_unit = np.argmin(np.linalg.norm(values - target, axis=0))
         x = best_unit % self.width
         y = best_unit // self.width
@@ -103,6 +141,8 @@ class SelfOrganisingReservoir(BaseEstimator):
 
         values += learning_rate * distribution * (target - values)
 
+        values *= ones
+
     def update_activations(self, x, activations):
         input_diff = np.linalg.norm(self.input_weights - x, axis=0) ** 2
         internal_diff = np.linalg.norm(self.internal_weights - activations, axis=0) ** 2
@@ -110,14 +150,12 @@ class SelfOrganisingReservoir(BaseEstimator):
                                  self.internal_scaling * internal_diff)[np.newaxis].T
         return (1. - self.leakage) * activations + self.leakage * new_activations
                 
-
-
     def initial_input_weights(self):
         a = np.linspace(1. / self.n_inputs, 1, self.n_inputs)[np.newaxis]
         b = np.linspace(1. / self.n_internal, 1, self.n_internal)[np.newaxis]
         return a.T.dot(b)
         
-    def initial_internal_weights(self):
+    def initial_internal_weights2(self):
         return np.eye(self.n_internal)
 
 
