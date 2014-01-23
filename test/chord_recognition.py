@@ -249,8 +249,6 @@ def chord_data(n_pretrain, n_train, n_test, return_notes=False):
     ids = meta_data.keys()
     random.shuffle(ids)
 
-    import ipdb; ipdb.set_trace()
-
     pretrain_inputs, pretrain_outputs, pretrain_split_points = read_data(ids[:n_pretrain], return_notes=return_notes)
     train_inputs, train_outputs, train_split_points = read_data(ids[n_pretrain:n_pretrain + n_train], return_notes=return_notes)
     test_inputs, test_outputs, test_split_points = read_data(ids[n_pretrain + n_train:n_pretrain + n_train + n_test], return_notes=return_notes)

@@ -1,17 +1,34 @@
 import numpy as np
 import chord_recognition
 
+import random
+
+#random.seed(1)
+#np.random.seed(1)
+
 import matplotlib.pyplot as plt
 plt.ion()
 
 (pretrain_inputs, pretrain_outputs, pretrain_split_points,
  train_inputs, train_outputs, train_split_points,
  test_inputs, test_outputs, test_split_points
-) = chord_recognition.chord_data(1, 3, 50, return_notes=False)
+) = chord_recognition.chord_data(1, 200, 50, return_notes=False)
 
 import esn.wind
-network = esn.wind.Network(12, 20, 20)
+network = esn.wind.Network(12, 25, 25)
 network.pretrain(pretrain_inputs)
+
+network.fit(train_inputs, train_outputs, train_split_points)
+train_state = network.predict(train_inputs, train_split_points)
+test_state = network.predict(test_inputs, test_split_points)
+
+train_predicted = np.argmax(train_state, 1)
+train_actual = np.argmax(train_outputs, 1)
+test_predicted = np.argmax(test_state, 1)
+test_actual = np.argmax(test_outputs, 1)
+
+train_correct = sum(train_predicted == train_actual) / float(len(train_actual))
+test_correct = sum(test_predicted == test_actual) / float(len(test_actual))
 
 import ipdb; ipdb.set_trace()
 
@@ -61,7 +78,7 @@ history = np.zeros((len(inputs), n_internal))
 
 fixed_weights = scipy.sparse.vstack((input_weights, internal_weights))
 
-leakage = .5
+leakage = .3
 
 for i, x in enumerate(inputs):
     x = x[np.newaxis].T
@@ -81,7 +98,7 @@ for i, x in enumerate(inputs):
 
     history[i, :] = activations.T
 
-def linear_regression(history, outputs, beta=0):
+def linear_regression(history, outputs, beta=10):
     return outputs.T.dot(history).dot(np.linalg.inv(history.T.dot(history) + beta)).T
 
 #plt.imshow(history, aspect='auto', interpolation='none')
