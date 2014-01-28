@@ -82,7 +82,7 @@ class Neuron(object):
 
 class Network(BaseEstimator):
 
-    def __init__(self, n_inputs, width, height, spectral_radius=0.8, sharpness=4.0, damping=0.4):
+    def __init__(self, n_inputs, width, height, spectral_radius=0.8, sharpness=4.0, damping=0.4, leakage=0.2, beta=0):
         self.n_inputs = n_inputs
         self.width = width
         self.height = height
@@ -91,6 +91,8 @@ class Network(BaseEstimator):
         self.input_weights = np.random.rand(n_inputs, self.n_internal)
         #self.spectral_radius = 1.1
         self.spectral_radius = spectral_radius
+        self.leakage = leakage
+        self.beta = beta
 
         for row in range(self.n_internal):
             self.neurons.append(Neuron(random_direction(),
@@ -116,6 +118,11 @@ class Network(BaseEstimator):
     def neuron_position(self, index):
         return index % self.width, index // self.width
 
+    def set_random_internal_weights(self, connectivity):
+        weights = scipy.sparse.rand(
+            self.n_internal, self.n_internal, connectivity).todense()
+        self.internal_weights = self.normalise_weights(weights)
+
     def pretrain(self, inputs, split_points=None):
         activations = np.zeros((self.n_internal, 1))
         history = np.zeros((len(inputs), self.n_internal))
@@ -127,7 +134,7 @@ class Network(BaseEstimator):
         for i, x in enumerate(inputs):
             x = x[np.newaxis].T
 
-            if i % 1 == 0:
+            if False and i % 1 == 0:
                 print '%d/%d' % (i, len(inputs))
 
             if split_points is not None and i in split_points:
@@ -139,13 +146,15 @@ class Network(BaseEstimator):
             learning_rate *= .96
             #print learning_rate
 
-            print np.max(activations), np.min(activations), learning_rate
+            #print np.max(activations), np.min(activations), learning_rate
 
             #if True or i % 5 == 0:
             #    self.plot_arrows()
 
             if i > 10:
                 break
+
+        self.internal_weights = self.to_weight_matrix()
 
     def update_activations(self, x, learning_rate):
         activations = []
@@ -155,6 +164,7 @@ class Network(BaseEstimator):
             if True or i == 0:
                 #activations.append(neuron.update(1, learning_rate))
                 activations.append(neuron.update(x.T.dot(self.input_weights[:, i]), learning_rate))
+
             else:
                 activations.append(neuron.update(0, learning_rate))
 
@@ -175,7 +185,10 @@ class Network(BaseEstimator):
 #                    weight *= -1
                 weights[i, neighbour_index] = weight
 
+        weights = self.normalise_weights(weights)
+        return weights
 
+    def normalise_weights(self, weights):
         eigs = np.abs(np.linalg.eigvals(weights))
         weights /= np.max(eigs)
         weights *= self.spectral_radius
@@ -236,13 +249,14 @@ class Network(BaseEstimator):
 
     def fit(self, inputs, outputs, split_points=None):
         self.input_weights -= .5
+        self.input_weights *= 1.5
+        print np.min(self.input_weights), np.max(self.input_weights)
 
 #        self.input_weights[:, :] = 0
 #        for i in range(self.n_inputs):
 #            for j in range(5):
 #                self.input_weights[i, np.random.randint(self.n_internal)] = np.sign(np.random.rand() - .5)
 
-        self.internal_weights = self.to_weight_matrix()
         history = self.get_history(inputs, split_points)
         self.output_weights = self.linear_regression(history, outputs)
 
@@ -251,12 +265,11 @@ class Network(BaseEstimator):
         history = np.zeros((len(inputs), self.n_internal))
 
         fixed_weights = np.vstack((self.input_weights, self.internal_weights))
-        leakage = .2
 
         for i, x in enumerate(inputs):
             x = x[np.newaxis].T * .3
 
-            if i % 10000 == 0:
+            if False and i % 10000 == 0:
                 print 'train %d/%d' % (i, len(inputs))
                 #self.plot_state(i, history)
 
@@ -264,7 +277,7 @@ class Network(BaseEstimator):
                 activations = np.zeros((self.n_internal, 1))
 
             total_state = np.vstack((x, activations))
-            activations = leakage * np.tanh(fixed_weights.T.dot(total_state)) + (1 - leakage) * activations
+            activations = self.leakage * np.tanh(fixed_weights.T.dot(total_state)) + (1 - self.leakage) * activations
 
             history[i, :] = activations.T
 
@@ -274,8 +287,8 @@ class Network(BaseEstimator):
         history = self.get_history(inputs, split_points)
         return history.dot(self.output_weights)
 
-    def linear_regression(self, history, outputs, beta=0):
+    def linear_regression(self, history, outputs):
         #return outputs.T.dot(history).dot(np.linalg.inv(history.T.dot(history) + beta)).T
         return np.linalg.inv(
-            history.T.dot(history) + beta * np.eye(history.shape[1])
+            history.T.dot(history) + self.beta * np.eye(history.shape[1])
         ).dot(history.T).dot(outputs)

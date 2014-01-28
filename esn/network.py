@@ -24,7 +24,10 @@ class EchoStateNetwork(object):
                  leakage=0,
                  reservoir_activation_function='tanh',
                  output_activation_function='identity',
+                 beta=0,
                  num_threads=1):
+
+        self.beta = beta
 
         self.n_input_units = n_input_units
         self.width = width
@@ -90,7 +93,8 @@ class EchoStateNetwork(object):
 
         state_matrix = self.compute_state_matrix(input, output, n_forget_points, reset_points=reset_points)
         teacher_matrix = self._compute_teacher_matrix(output, n_forget_points)
-        self.output_weights = ridge_regression(state_matrix, teacher_matrix)
+        print self.beta
+        self.output_weights = ridge_regression(state_matrix, teacher_matrix, self.beta)
 
         return state_matrix
 
@@ -149,8 +153,8 @@ class EchoStateNetwork(object):
                 state_matrix[i - n_forget_points, :self.n_internal_units] = self.internal_state
                 state_matrix[i - n_forget_points, self.n_internal_units:] = scaled_input
 
-#            if i % 1000 == 0:
-#                print i, len(input)
+            if i % 1000 == 0:
+                print i, len(input)
 
             if self.callback:
                 callback_state[i % self.callback_every,:] = np.hstack((scaled_input, self.internal_state, scaled_output))
@@ -377,9 +381,11 @@ def linear_regression(state_matrix, teacher_matrix):
     inv = np.array(np.linalg.inv(cov_mat), dtype='float32')
     return (inv.dot(p_vec)).T
 
-def ridge_regression(state_matrix, teacher_matrix, beta=1):
-    return teacher_matrix.T.dot(state_matrix).dot(
-        np.linalg.inv(state_matrix.T.dot(state_matrix) + beta))
+def ridge_regression(history, outputs, beta=0):
+    print history.shape, outputs.shape
+    return np.linalg.inv(
+        history.T.dot(history) + beta * np.eye(history.shape[1])
+    ).dot(history.T).dot(outputs).T
 
 def logistic_regression(state_matrix, teacher_matrix):
     for i in range(state_matrix.shape[1]):

@@ -6,6 +6,11 @@ import signal
 import simplejson as json
 import os
 
+import numpy as np
+import random
+random.seed(1)
+np.random.seed(1)
+
 import esn
 import chord_recognition
 
@@ -13,7 +18,9 @@ train_input = train_output = train_split_points = test_input = test_output = tes
 
 def get_score(params):
 
-    width = height = 50
+    print 'before making net'
+
+    width = height = 40
     n_input_units = 12
     n_output_units = len(chord_recognition.CHORD_MAP)
     network = esn.EchoStateNetwork(
@@ -24,14 +31,16 @@ def get_score(params):
         connectivity=params['connectivity'],
         input_scaling=[params['input_scaling']] * n_input_units,
         input_shift=[0] * n_input_units,
-        noise_level=0.001,
+        noise_level=0.01,
         spectral_radius=params['spectral_radius'],
         feedback_scaling=[0] * n_output_units,
         leakage=np.array([params['leakage1']] * (width * height / 2) + [params['leakage2']] * (width * height / 2)),
         teacher_scaling=.99,
-        output_activation_function='tanh'
+        output_activation_function='tanh',
+        beta=params['beta'],
     )
 
+    print 'before training'
     network.train(train_input, train_output, reset_points=train_split_points, n_forget_points=0)
     network.noise_level = 0
     estimated_output = network.test(test_input, reset_points=test_split_points, n_forget_points=0)
@@ -45,7 +54,7 @@ def get_score(params):
 
     with open(filename, 'w') as f:
         json.dump(params, f)
-    os.system('scp %s jansson.me.uk:~/scores/%s' % (filename, filename))
+#    os.system('scp %s jansson.me.uk:~/scores/%s' % (filename, filename))
 
 #    print 'connectivity: %.2f' % params['connectivity']
 #    print 'input_scaling: %.2f' % params['input_scaling']
@@ -69,12 +78,26 @@ def main():
     train_input, train_output, train_split_points = chord_recognition.read_data(ids[:n_train])
     test_input, test_output, test_split_points = chord_recognition.read_data(ids[n_train:n_train + n_test])
 
+    print 'after read'
+
     grid = {
-        'connectivity': [.02, .05, .1],
-        'spectral_radius': [.5, .8, 1.1, 1.3],
-        'leakage1': [.05, .1, .2],
-        'leakage2': [.02, .15, .4, .8],
+        'connectivity': [.01, .05, .1],
+        'spectral_radius': [.8],
+        'leakage1': [.1, .2],
+        'leakage2': [.4, .8],
         'input_scaling': [.75],
+        'beta': [100, 10, 1, .1, 0],
+    }
+
+    n_grid_threads=1
+
+    grid = {
+        'connectivity': [.05],
+        'spectral_radius': [.8],
+        'leakage1': [.2],
+        'leakage2': [.4],
+        'input_scaling': [.75],
+        'beta': [1],
     }
 
     items = sorted(grid.items())
