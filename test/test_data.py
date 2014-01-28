@@ -4,6 +4,7 @@ import simplejson as json
 import itertools
 import glob
 import random
+import os
 
 from esn import EchoStateNetwork
 
@@ -219,7 +220,87 @@ def test_data3(waveform, sequence_length=10000, min_pitch=30, max_pitch=60, sr=S
     return pitches, audio, esn
 
 
-def instrumentalness(n_train=100, n_test=200, deterministic=False, side=10):
+def instrumentalness_spec(n_pretrain, n_train, n_test, sr=22050, window_size=128, downsample=4):
+    spec_dir = '/home/andreas/data/instrumentalness/spectrograms_auditory'
+    cache_dir = '/home/andreas/data/instrumentalness/data_cache'
+    annotations_dir = '/home/andreas/data/instrumentalness/annotations'
+
+    spec_filenames = sorted(glob.glob('%s/*.mp3_auditory_spectrogram' % spec_dir))
+
+    #random.shuffle(spec_filenames)
+
+    def read_files(spec_filenames):
+        split_points = []
+        all_data = []
+        all_labels = []
+
+        for spec_filename in spec_filenames:
+            data = []
+            trid = (spec_filename
+                    .replace('.mp3_auditory_spectrogram', '.csv')
+                    .replace(spec_dir + '/', ''))
+
+            cache_filename = '%s/%s.json' % (cache_dir, trid)
+            cached = False
+            if os.path.exists(cache_filename):
+                with open(cache_filename, 'r') as f:
+                    try:
+                        data, labels = json.load(f)
+                        cached = True
+                    except json.scanner.JSONDecodeError:
+                        pass
+
+            if not cached:
+                annotations_filename = '%s/%s' % (annotations_dir, trid)
+
+                i = 0
+                with open(spec_filename, 'r') as f:
+                    avg_values = np.zeros(23)
+                    for line in f:
+                        values = [float(x) for x in line.strip().split(' ')]
+                        avg_values += values
+                        i += 1
+                        if i == downsample:
+                            data.append((avg_values / downsample).tolist())
+                            avg_values = np.zeros(23)
+                            i = 0
+
+                labels = [0] * len(data)
+
+                window_seconds = downsample * window_size / float(sr)
+                with open(annotations_filename, 'r') as f:
+                    for line in f:
+                        split = line.split(',')
+                        start = float(split[0])
+                        duration = float(split[-1])
+                        i = int(start / window_seconds)
+                        while i < (start + duration) / window_seconds and i < len(labels):
+                            labels[i] = 1
+                            i += 1
+
+                with open(cache_filename, 'w') as f:
+                    json.dump((data, labels), f)
+
+            all_data += data
+            all_labels += labels
+            split_points.append(len(all_labels))
+
+        all_labels = np.array(all_labels)
+        all_data = np.array(all_data) / 100.
+        labels = np.zeros((len(all_labels), 2))
+        labels[np.array(all_labels) == 0, 0] = 1
+        labels[all_labels == 1, 1] = 1
+
+        return all_data, labels, split_points
+
+    pretrain_inputs, pretrain_outputs, pretrain_split_points = read_files(spec_filenames[:n_pretrain])
+    train_inputs, train_outputs, train_split_points = read_files(spec_filenames[n_pretrain:n_pretrain + n_train])
+    test_inputs, test_outputs, test_split_points = read_files(spec_filenames[n_pretrain + n_train:n_pretrain + n_train + n_test])
+
+    return pretrain_inputs, pretrain_outputs, pretrain_split_points, train_inputs, train_outputs, train_split_points, test_inputs, test_outputs, test_split_points
+
+
+def instrumentalness(n_pretrain, n_train, n_test, deterministic=False, side=10):
     segment_dir = '/home/andreas/r/instrumentalness/segments'
     vocal_dir = '/home/andreas/r/instrumentalness/slicing/full_tracks'
 
@@ -260,7 +341,7 @@ def instrumentalness(n_train=100, n_test=200, deterministic=False, side=10):
                 if len(vocal_segments) == 0:
                     segment['vocal'] = False
                     continue
- 
+
                 time = segment['start']
                 start, duration = vocal_segments[vocal_ndx]
                 while time > start + duration and vocal_ndx < len(vocal_segments) - 1:
@@ -281,30 +362,20 @@ def instrumentalness(n_train=100, n_test=200, deterministic=False, side=10):
                 output = np.vstack((output, vocal))
             splits.append(t)
 
-        return input, output, splits
+        input /= np.max(input, 0) - np.min(input, 0)
+        input -= np.min(input, 0)
 
-    train_input, train_output, train_splits = get_input_output_splits(segment_filenames[:n_train], vocal_filenames[:n_train])
-    test_input, test_output, test_splits = get_input_output_splits(segment_filenames[n_train:], vocal_filenames[n_train:])
+        labels = np.zeros((len(output), 2))
+        labels[output.ravel() == 0, 0] = 1
+        labels[output.ravel() == 1, 1] = 1
+        
+        return input, labels, splits
 
-    n_input_units = 12
-    width = height = side
+    pretrain_inputs, pretrain_outputs, pretrain_split_points = get_input_output_splits(segment_filenames[:n_pretrain], vocal_filenames[:n_pretrain])
+    train_inputs, train_outputs, train_split_points = get_input_output_splits(segment_filenames[n_pretrain:n_pretrain + n_train], vocal_filenames[n_pretrain:n_pretrain + n_train])
+    test_inputs, test_outputs, test_split_points = get_input_output_splits(segment_filenames[n_pretrain + n_train:n_pretrain + n_train + n_test], vocal_filenames[n_pretrain + n_train:n_pretrain + n_train + n_test])
 
-    esn = NeighbourESN(
-        n_input_units=n_input_units,
-        width=width,
-        height=height,
-        n_output_units=1,
-        input_scaling=[.02] * n_input_units,
-        input_shift=[-.05] * n_input_units,
-        teacher_scaling=[1.2],
-        teacher_shift=[-.6],
-        noise_level=0.002,
-        spectral_radius=.9,
-        feedback_scaling=[1],
-        output_activation_function='tanh',
-    )
-
-    return train_input, train_output, train_splits, test_input, test_output, test_splits, esn
+    return pretrain_inputs, pretrain_outputs, pretrain_split_points, train_inputs, train_outputs, train_split_points, test_inputs, test_outputs, test_split_points
 
 
 def music():

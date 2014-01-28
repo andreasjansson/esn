@@ -29,14 +29,14 @@ def random_direction():
 
 class Neuron(object):
 
-    def __init__(self, initial_direction, fixed_direction=False):
+    def __init__(self, initial_direction, fixed_direction=False, sharpness=4.0, damping=0.4):
         self.neighbours = {}
         self.activation = 0
         self.direction = initial_direction
         self.fixed_direction = fixed_direction
         self.incoming_activations = {}
-        self.sharpness = 4.0
-        self.damping = 0.4
+        self.sharpness = sharpness
+        self.damping = damping
 
     def set_neighbour(self, direction, neuron):
         self.neighbours[direction] = neuron
@@ -82,7 +82,7 @@ class Neuron(object):
 
 class Network(BaseEstimator):
 
-    def __init__(self, n_inputs, width, height):
+    def __init__(self, n_inputs, width, height, spectral_radius=0.8, sharpness=4.0, damping=0.4):
         self.n_inputs = n_inputs
         self.width = width
         self.height = height
@@ -90,10 +90,11 @@ class Network(BaseEstimator):
         self.neurons = []
         self.input_weights = np.random.rand(n_inputs, self.n_internal)
         #self.spectral_radius = 1.1
-        self.spectral_radius = 0.8
+        self.spectral_radius = spectral_radius
 
         for row in range(self.n_internal):
-            self.neurons.append(Neuron(random_direction()))
+            self.neurons.append(Neuron(random_direction(),
+                                       sharpness=sharpness, damping=damping))
         for i in range(max(1, int(np.sqrt(self.n_internal) / 6))):
             self.neurons[np.random.randint(self.n_internal)].fixed_direction = True
 
@@ -120,6 +121,8 @@ class Network(BaseEstimator):
         history = np.zeros((len(inputs), self.n_internal))
 
         learning_rate = .4
+        inputs = inputs.copy()
+        np.random.shuffle(inputs)
 
         for i, x in enumerate(inputs):
             x = x[np.newaxis].T
@@ -138,8 +141,8 @@ class Network(BaseEstimator):
 
             print np.max(activations), np.min(activations), learning_rate
 
-            if True or i % 5 == 0:
-                self.plot_arrows()
+            #if True or i % 5 == 0:
+            #    self.plot_arrows()
 
             if i > 10:
                 break

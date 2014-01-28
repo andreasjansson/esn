@@ -12,10 +12,10 @@ plt.ion()
 (pretrain_inputs, pretrain_outputs, pretrain_split_points,
  train_inputs, train_outputs, train_split_points,
  test_inputs, test_outputs, test_split_points
-) = chord_recognition.chord_data(1, 200, 50, return_notes=False)
+) = chord_recognition.chord_data(1, 100, 50, return_notes=False)
 
 import esn.wind
-network = esn.wind.Network(12, 25, 25)
+network = esn.wind.Network(12, 15, 15)
 network.pretrain(pretrain_inputs)
 
 network.fit(train_inputs, train_outputs, train_split_points)
